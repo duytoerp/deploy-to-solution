@@ -1,0 +1,275 @@
+<Window x:Class="DeployToSolution.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deploy To Solution - add component hàng loạt vào solution Dataverse"
+        Height="820" Width="1360" WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Chrome}" FontSize="13">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="220" />
+            <RowDefinition Height="6" />
+            <RowDefinition Height="190" MinHeight="70" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ===== connection bar ===== -->
+        <Border Grid.Row="0" Background="{StaticResource Brand}" Padding="14,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal">
+                    <TextBlock Text="Deploy To Solution" Foreground="White" FontSize="17" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="0,0,18,0" />
+                    <TextBlock Text="Môi trường" Foreground="#E9D5E9" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox Width="360" IsEditable="True" VerticalAlignment="Center"
+                              Text="{Binding EnvironmentUrl, UpdateSourceTrigger=PropertyChanged}"
+                              ItemsSource="{Binding RecentEnvironments}"
+                              ToolTip="Ví dụ: https://vus-dev.crm5.dynamics.com" />
+                    <Button Content="Kết nối" Style="{StaticResource Flat}" Margin="8,0,0,0"
+                            Command="{Binding ConnectCommand}" />
+                    <Button Content="Đăng xuất" Style="{StaticResource Flat}"
+                            Command="{Binding DisconnectCommand}" />
+                    <TextBlock Text="{Binding ConnectedAs}" Foreground="White" VerticalAlignment="Center"
+                               Margin="14,0,0,0" FontStyle="Italic" TextTrimming="CharacterEllipsis" MaxWidth="320" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
+                    <CheckBox Content="Dùng Client secret (app registration)" Foreground="White"
+                              VerticalAlignment="Center" IsChecked="{Binding UseClientSecret}" Margin="0,0,14,0" />
+                    <TextBlock Text="Tenant (tự dò)" Foreground="#E9D5E9" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox Width="230" VerticalAlignment="Center" Text="{Binding Tenant}"
+                             ToolTip="Để TRỐNG là được - app tự dò Tenant ID từ URL môi trường. Chỉ điền khi muốn ép một tenant cụ thể." />
+                    <TextBlock Text="Client id" Foreground="#E9D5E9" VerticalAlignment="Center" Margin="12,0,6,0" />
+                    <TextBox Width="270" VerticalAlignment="Center" Text="{Binding ClientId}" />
+                    <TextBlock Text="Secret" Foreground="#E9D5E9" VerticalAlignment="Center" Margin="12,0,6,0"
+                               Visibility="{Binding UseClientSecret, Converter={StaticResource BoolToVis}}" />
+                    <PasswordBox x:Name="SecretBox" Width="180" VerticalAlignment="Center"
+                                 PasswordChanged="SecretBox_PasswordChanged"
+                                 Visibility="{Binding UseClientSecret, Converter={StaticResource BoolToVis}}" />
+                    <CheckBox Content="Nhớ đăng nhập" Foreground="White" VerticalAlignment="Center"
+                              Margin="14,0,0,0" IsChecked="{Binding RememberSignIn}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ===== device code banner ===== -->
+        <Border Grid.Row="1" Background="#FFF4CE" BorderBrush="#F2C94C" BorderThickness="0,0,0,1" Padding="14,8"
+                Visibility="{Binding HasDeviceCode, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Nhập mã đăng nhập:" VerticalAlignment="Center" FontWeight="SemiBold" />
+                <TextBox Text="{Binding DeviceCode, Mode=OneWay}" IsReadOnly="True" FontSize="18"
+                         FontFamily="Consolas" Margin="10,0" BorderThickness="1" Padding="8,2" />
+                <Button Content="Mở trang đăng nhập" Style="{StaticResource Flat}"
+                        Command="{Binding OpenVerificationCommand}" />
+                <TextBlock Text="(mã đã được copy sẵn vào clipboard)" VerticalAlignment="Center"
+                           Foreground="#7A6000" Margin="8,0,0,0" />
+            </StackPanel>
+        </Border>
+
+        <!-- ===== main content ===== -->
+        <Grid Grid.Row="2" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330" MinWidth="220" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- solutions -->
+            <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#FAF9F8" Padding="10,8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <TextBlock Text="1. Chọn solution đích" FontWeight="Bold" />
+                            <TextBlock Text="Tick nhiều solution (UAT, PROD...) để add cùng lúc."
+                                       Foreground="#605E5C" TextWrapping="Wrap" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border DockPanel.Dock="Top" Padding="8,6">
+                        <StackPanel>
+                            <TextBox Text="{Binding SolutionFilter, UpdateSourceTrigger=PropertyChanged}"
+                                     Padding="4,3" ToolTip="Lọc theo tên solution" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="Tải lại" Style="{StaticResource Flat}" MinWidth="60"
+                                        Command="{Binding RefreshSolutionsCommand}" />
+                                <Button Content="Chọn hết" Style="{StaticResource Flat}" MinWidth="60"
+                                        Command="{Binding SelectAllSolutionsCommand}" />
+                                <Button Content="Bỏ hết" Style="{StaticResource Flat}" MinWidth="60"
+                                        Command="{Binding SelectNoSolutionsCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <ListBox ItemsSource="{Binding Solutions}" BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="2,3">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding UniqueName}" FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Foreground="#605E5C" TextWrapping="Wrap">
+                                            <Run Text="{Binding FriendlyName, Mode=OneWay}" />
+                                            <Run Text=" v" />
+                                            <Run Text="{Binding Version, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </CheckBox>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- components -->
+            <Border Grid.Column="2" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#FAF9F8" Padding="10,8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <TextBlock Text="2. Danh sách component cần add" FontWeight="Bold" />
+                            <TextBlock Foreground="#605E5C" TextWrapping="Wrap" Margin="0,2,0,0"
+                                       Text="CSV: Type,Name,IncludeAll. Column ghi dạng bang.cot - View/Form ghi dạng bang|tên. Dán thẳng GUID vào Name nếu trùng tên." />
+                        </StackPanel>
+                    </Border>
+
+                    <Border DockPanel.Dock="Top" Padding="8,6" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Nạp CSV" Style="{StaticResource Flat}" Command="{Binding ImportCsvCommand}" />
+                            <Button Content="Dán từ Excel" Style="{StaticResource Flat}" Command="{Binding PasteCommand}" />
+                            <Button Content="Thêm dòng" Style="{StaticResource Flat}" Command="{Binding AddRowCommand}" />
+                            <Button Content="Xóa dòng" Style="{StaticResource Flat}" Click="RemoveSelected_Click" />
+                            <Button Content="Xóa hết" Style="{StaticResource Flat}" Command="{Binding ClearRowsCommand}" />
+                            <Border Width="1" Background="{StaticResource Line}" Margin="8,2" />
+                            <Button Content="Xuất CSV" Style="{StaticResource Flat}" Command="{Binding ExportCsvCommand}" />
+                            <Button Content="Lưu báo cáo" Style="{StaticResource Flat}" Command="{Binding SaveReportCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <DataGrid x:Name="RowsGrid" ItemsSource="{Binding Rows}" AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDEBE9"
+                              RowHeaderWidth="0" BorderThickness="0" SelectionMode="Extended"
+                              AlternatingRowBackground="#FBFAFA">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="✓" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="34" />
+
+                            <DataGridTemplateColumn Header="Type" Width="150">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Type}" VerticalAlignment="Center" Margin="4,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <ComboBox IsEditable="True"
+                                                  Text="{Binding Type, UpdateSourceTrigger=LostFocus}"
+                                                  ItemsSource="{Binding DataContext.TypeNames,
+                                                      RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="320" />
+
+                            <DataGridCheckBoxColumn Header="IncludeAll"
+                                                    Binding="{Binding IncludeAll, UpdateSourceTrigger=PropertyChanged}"
+                                                    Width="80" />
+
+                            <DataGridTemplateColumn Header="Trạng thái" Width="110" IsReadOnly="True">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding StateText}" Foreground="{Binding StateBrush}"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center" Margin="4,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="Chi tiết" Binding="{Binding Message}" Width="*" IsReadOnly="True">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                        <Setter Property="ToolTip" Value="{Binding Message}" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
+                            <DataGridTextColumn Header="ObjectId" Binding="{Binding ObjectId}" Width="130"
+                                                IsReadOnly="True" FontFamily="Consolas" />
+                            <DataGridTextColumn Header="Code" Binding="{Binding ComponentType}" Width="48" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- ===== actions ===== -->
+        <Border Grid.Row="5" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                Margin="10,0,10,10" Padding="10,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="3." FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <Button Content="Kiểm tra tên" Style="{StaticResource Flat}" MinWidth="110"
+                        Command="{Binding ResolveCommand}"
+                        ToolTip="Chỉ tìm ID của từng component, chưa ghi gì lên môi trường" />
+                <Button Content="Chạy thử" Style="{StaticResource Flat}" MinWidth="110"
+                        Command="{Binding DryRunCommand}"
+                        ToolTip="Xem sẽ add gì vào solution nào, không ghi thật" />
+                <Button Content="ADD VÀO SOLUTION" Style="{StaticResource Primary}" MinWidth="170"
+                        Command="{Binding RunCommand}" />
+                <Button Content="Hủy" Style="{StaticResource Flat}" Command="{Binding CancelCommand}" />
+                <Border Width="1" Background="{StaticResource Line}" Margin="10,2" />
+                <CheckBox Content="Add required components" VerticalAlignment="Center"
+                          IsChecked="{Binding AddRequiredComponents}"
+                          ToolTip="Kéo theo các component phụ thuộc mà Dataverse yêu cầu. Mặc định tắt cho hotfix." />
+                <CheckBox Content="Gỡ MetadataForArchival" VerticalAlignment="Center" Margin="12,0,0,0"
+                          IsChecked="{Binding CleanupArchival}"
+                          ToolTip="Khi add một Table, Dataverse tự kéo thêm bản ghi MetadataForArchival cùng tên (metadata retention). Tick để gỡ nó khỏi solution. Bản ghi đã bật retention thật sẽ luôn được giữ lại." />
+                <ProgressBar Width="220" Height="16" Margin="16,0,8,0" VerticalAlignment="Center"
+                             Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding Progress}" />
+                <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="#605E5C"
+                           TextTrimming="CharacterEllipsis" MaxWidth="420" />
+            </StackPanel>
+        </Border>
+
+        <GridSplitter Grid.Row="3" Height="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+        <!-- ===== log ===== -->
+        <Border Grid.Row="4" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                Margin="10,0,10,8">
+            <DockPanel>
+                <Border DockPanel.Dock="Top" Background="#FAF9F8" Padding="10,6"
+                        BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Nhật ký" FontWeight="Bold" VerticalAlignment="Center" />
+                        <Button Content="Copy log" Style="{StaticResource Flat}" Margin="12,0,0,0" MinWidth="70"
+                                Padding="8,2" Command="{Binding CopyLogCommand}" />
+                    </StackPanel>
+                </Border>
+                <ListBox x:Name="LogList" ItemsSource="{Binding Log}" BorderThickness="0" FontFamily="Consolas"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Display}" Foreground="{Binding Brush}"
+                                       FontWeight="{Binding Weight}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

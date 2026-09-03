@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+publish/
+publish-standalone/
+[Dd]ebug/
+[Rr]elease/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# Local settings that must never be shared
+appsettings.local.json
+*.env
+secrets.json

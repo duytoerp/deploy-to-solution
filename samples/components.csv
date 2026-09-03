@@ -1,0 +1,19 @@
+Type,Name,IncludeAll
+Table,hs_api_log,N
+Table,hs_admin_schedule,N
+Table,hs_care_certificate_test,Y
+Column,hs_api_log.hs_retry_count,N
+BPF,[BPF] Incident Report Process,N
+BPF,[BPF] Inventory Recording Process,N
+Workflow,[WF] Incident Report Change Stage Process,N
+Workflow,[WF] Inventory Recording Change Stage Process,N
+Workflow,[WF][Invoice] Update Canceled Date,N
+PluginAssembly,VUS.Core.Plugins,N
+PluginStep,VUS.Core.Plugins.PreUpdateInvoice,N
+WebResource,hs_/js/invoice_form.js,N
+Choice,hs_care_status_choice,N
+View,hs_api_log|Active API Logs,N
+Form,hs_api_log|Information,N
+SecurityRole,VUS Core User,N
+ConnectionReference,hs_sharedcommondataserviceforapps_abc12,N
+EnvironmentVariable,hs_ApiBaseUrl,N
