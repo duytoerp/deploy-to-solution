@@ -8,7 +8,7 @@ namespace DeployToSolution.Services
 {
     /// <summary>
     /// Dựng bản tóm tắt để dán vào ticket deploy: gom component theo loại,
-    /// và rút gọn danh sách plugin step trùng tiền tố thành "prefix.*".
+    /// giữ nguyên tên đầy đủ và đúng thứ tự người dùng đã sắp.
     /// </summary>
     /// <summary>Một nhóm trong báo cáo deploy, ví dụ "Code dll" kèm các dòng của nó.</summary>
     public class ReportGroup
@@ -159,13 +159,11 @@ namespace DeployToSolution.Services
 
         private static IEnumerable<string> Lines(string key, List<ComponentRow> items)
         {
-            var names = items.Select(Display).Where(n => !string.IsNullOrWhiteSpace(n));
-
-            if (key == "sdkmessageprocessingstep")
-                return CollapseSteps(names);
-
-            // Giữ nguyên thứ tự người dùng đã sắp trong danh sách, không tự sort lại.
-            return names.Select(n => "- " + n).ToList();
+            // Giữ nguyên tên đầy đủ và thứ tự người dùng đã sắp trong danh sách.
+            return items.Select(Display)
+                        .Where(n => !string.IsNullOrWhiteSpace(n))
+                        .Select(n => "- " + n)
+                        .ToList();
 
             string Display(ComponentRow row)
             {
@@ -179,50 +177,6 @@ namespace DeployToSolution.Services
 
                 return name;
             }
-        }
-
-        /// <summary>
-        /// Nhiều step cùng một tiền tố được rút thành "prefix.*" cho ticket dễ đọc.
-        /// Chèn dòng trống khi đổi namespace gốc (3 đoạn đầu) để các cụm tách bạch.
-        /// </summary>
-        private static List<string> CollapseSteps(IEnumerable<string> names)
-        {
-            var groups = names
-                .Select(n => n.Trim())
-                .GroupBy(Prefix)
-                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var lines = new List<string>();
-            string previousRoot = null;
-
-            foreach (var group in groups)
-            {
-                var root = NamespaceRoot(group.Key);
-                if (previousRoot != null && !string.Equals(root, previousRoot, StringComparison.OrdinalIgnoreCase))
-                    lines.Add("");
-                previousRoot = root;
-
-                if (group.Count() >= 2 && group.Key.Length > 0)
-                    lines.Add($"- {group.Key}.*");
-                else
-                    foreach (var single in group.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
-                        lines.Add("- " + single);
-            }
-
-            return lines;
-        }
-
-        private static string Prefix(string name)
-        {
-            var at = name.LastIndexOf('.');
-            return at > 0 ? name.Substring(0, at) : name;
-        }
-
-        private static string NamespaceRoot(string prefix)
-        {
-            var parts = prefix.Split('.');
-            return parts.Length <= 3 ? prefix : string.Join(".", parts.Take(3));
         }
 
         private static string Pretty(string key) =>

@@ -165,7 +165,7 @@
                                     ToolTip="Xuất danh sách ra .xlsx (hoặc chọn .csv trong hộp thoại lưu)" />
                             <Button Content="Báo cáo deploy" Style="{StaticResource Flat}" MinWidth="110"
                                     Command="{Binding DeployReportCommand}"
-                                    ToolTip="Bản tóm tắt gom theo loại (Table / Code dll / Step / Webresource / Security Roles) để dán vào ticket deploy" />
+                                    ToolTip="Bản tóm tắt gom theo loại (Table / Code dll / Step / Webresource / Security Roles), tên đầy đủ, để dán vào ticket deploy" />
                             <Button Content="Lưu báo cáo" Style="{StaticResource Flat}"
                                     Command="{Binding SaveReportCommand}"
                                     ToolTip="Xuất CSV chi tiết: objectid, trạng thái, thông báo của từng dòng" />

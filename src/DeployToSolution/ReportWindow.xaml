@@ -12,7 +12,7 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="#605E5C" TextWrapping="Wrap"
-                   Text="Nội dung dưới đây gom theo loại component, plugin step trùng tiền tố được rút thành prefix.* — dán thẳng vào ticket deploy." />
+                   Text="Nội dung dưới đây gom theo loại component, giữ nguyên tên đầy đủ và đúng thứ tự trong danh sách — dán thẳng vào ticket deploy." />
 
         <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1">
             <TextBox x:Name="ReportText" IsReadOnly="True" FontFamily="Consolas" FontSize="13"
