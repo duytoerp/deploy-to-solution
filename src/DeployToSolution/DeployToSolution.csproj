@@ -14,4 +14,10 @@
     <Product>Deploy To Solution</Product>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Nhúng thẳng vào exe để nút "Tải template" chạy được kể cả khi chỉ copy mỗi file exe. -->
+    <EmbeddedResource Include="..\..\samples\components-template.xlsx"
+                      LogicalName="DeployToSolution.components-template.xlsx" />
+  </ItemGroup>
+
 </Project>

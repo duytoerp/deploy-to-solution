@@ -14,24 +14,41 @@ namespace DeployToSolution.Services
         private static readonly string[] NameHeaders = { "name", "ten", "tên", "schemaname", "uniquename", "logicalname" };
         private static readonly string[] IncludeAllHeaders = { "includeall", "allobjects", "subcomponents", "full" };
 
+        /// <summary>Nạp danh sách từ .xlsx hoặc .csv/.txt, tự nhận theo phần mở rộng.</summary>
         public static List<ComponentRow> Load(string path)
-            => Parse(File.ReadAllText(path, DetectEncoding(path)));
+        {
+            var ext = (Path.GetExtension(path) ?? "").ToLowerInvariant();
+            if (ext == ".xlsx" || ext == ".xlsm")
+                return FromGrid(ExcelReader.Read(path));
+
+            return Parse(File.ReadAllText(path, DetectEncoding(path)));
+        }
 
         public static List<ComponentRow> Parse(string text)
         {
-            var rows = new List<ComponentRow>();
-            if (string.IsNullOrWhiteSpace(text)) return rows;
+            if (string.IsNullOrWhiteSpace(text)) return new List<ComponentRow>();
 
             var lines = SplitLines(text);
-            if (lines.Count == 0) return rows;
+            if (lines.Count == 0) return new List<ComponentRow>();
 
             var delimiter = DetectDelimiter(lines[0]);
-            var first = SplitFields(lines[0], delimiter);
+            return FromGrid(lines.Select(l => SplitFields(l, delimiter)).ToList());
+        }
 
-            // Without a header the columns are positional: Type, Name, IncludeAll.
+        /// <summary>
+        /// Chuyển lưới ô (từ CSV đã tách hoặc từ Excel) thành danh sách dòng component.
+        /// Nhận diện dòng tiêu đề, bỏ qua dòng trống và dòng chú thích bắt đầu bằng #.
+        /// </summary>
+        public static List<ComponentRow> FromGrid(List<List<string>> grid)
+        {
+            var rows = new List<ComponentRow>();
+            if (grid == null || grid.Count == 0) return rows;
+
+            // Không có tiêu đề thì các cột hiểu theo vị trí: Type, Name, IncludeAll.
             int typeIdx = 0, nameIdx = 1, includeIdx = 2;
             var start = 0;
 
+            var first = grid[0];
             if (LooksLikeHeader(first))
             {
                 typeIdx = IndexOfHeader(first, TypeHeaders);
@@ -42,16 +59,15 @@ namespace DeployToSolution.Services
                 start = 1;
             }
 
-            for (var i = start; i < lines.Count; i++)
+            for (var i = start; i < grid.Count; i++)
             {
-                var line = lines[i];
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                if (line.TrimStart().StartsWith("#")) continue;
+                var f = grid[i];
+                if (f == null || f.Count == 0) continue;
 
-                var f = SplitFields(line, delimiter);
                 var type = Field(f, typeIdx);
                 var name = Field(f, nameIdx);
                 if (string.IsNullOrWhiteSpace(type) && string.IsNullOrWhiteSpace(name)) continue;
+                if (type.StartsWith("#")) continue;
 
                 rows.Add(new ComponentRow
                 {

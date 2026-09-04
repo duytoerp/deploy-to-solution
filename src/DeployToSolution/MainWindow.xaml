@@ -143,20 +143,32 @@
                         <StackPanel>
                             <TextBlock Text="2. Danh sách component cần add" FontWeight="Bold" />
                             <TextBlock Foreground="#605E5C" TextWrapping="Wrap" Margin="0,2,0,0"
-                                       Text="CSV: Type,Name,IncludeAll. Column ghi dạng bang.cot - View/Form ghi dạng bang|tên. Dán thẳng GUID vào Name nếu trùng tên." />
+                                       Text="Cột: Type, Name, IncludeAll. Column ghi dạng bang.cot - View/Form ghi dạng bang|tên. Dán thẳng GUID vào Name nếu trùng tên. Chưa có file thì bấm Tải template." />
                         </StackPanel>
                     </Border>
 
                     <Border DockPanel.Dock="Top" Padding="8,6" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="Nạp CSV" Style="{StaticResource Flat}" Command="{Binding ImportCsvCommand}" />
+                            <Button Content="Tải template" Style="{StaticResource Flat}" MinWidth="100"
+                                    Command="{Binding DownloadTemplateCommand}"
+                                    ToolTip="Lưu file Excel mẫu ra đĩa và mở lên: có dropdown Type, sheet hướng dẫn và ví dụ." />
+                            <Button Content="Nạp Excel / CSV" Style="{StaticResource Flat}" MinWidth="120"
+                                    Command="{Binding ImportCsvCommand}"
+                                    ToolTip="Đọc thẳng .xlsx (sheet Components) hoặc .csv" />
                             <Button Content="Dán từ Excel" Style="{StaticResource Flat}" Command="{Binding PasteCommand}" />
                             <Button Content="Thêm dòng" Style="{StaticResource Flat}" Command="{Binding AddRowCommand}" />
                             <Button Content="Xóa dòng" Style="{StaticResource Flat}" Click="RemoveSelected_Click" />
                             <Button Content="Xóa hết" Style="{StaticResource Flat}" Command="{Binding ClearRowsCommand}" />
                             <Border Width="1" Background="{StaticResource Line}" Margin="8,2" />
-                            <Button Content="Xuất CSV" Style="{StaticResource Flat}" Command="{Binding ExportCsvCommand}" />
-                            <Button Content="Lưu báo cáo" Style="{StaticResource Flat}" Command="{Binding SaveReportCommand}" />
+                            <Button Content="Xuất Excel" Style="{StaticResource Flat}" MinWidth="90"
+                                    Command="{Binding ExportCsvCommand}"
+                                    ToolTip="Xuất danh sách ra .xlsx (hoặc chọn .csv trong hộp thoại lưu)" />
+                            <Button Content="Báo cáo deploy" Style="{StaticResource Flat}" MinWidth="110"
+                                    Command="{Binding DeployReportCommand}"
+                                    ToolTip="Bản tóm tắt gom theo loại (Table / Code dll / Step / Webresource / Security Roles) để dán vào ticket deploy" />
+                            <Button Content="Lưu báo cáo" Style="{StaticResource Flat}"
+                                    Command="{Binding SaveReportCommand}"
+                                    ToolTip="Xuất CSV chi tiết: objectid, trạng thái, thông báo của từng dòng" />
                         </StackPanel>
                     </Border>
 
@@ -164,7 +176,30 @@
                               CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDEBE9"
                               RowHeaderWidth="0" BorderThickness="0" SelectionMode="Extended"
-                              AlternatingRowBackground="#FBFAFA">
+                              AlternatingRowBackground="#FBFAFA" BeginningEdit="RowsGrid_BeginningEdit"
+                              PreviewKeyDown="RowsGrid_PreviewKeyDown">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <!-- Chuột phải phải chọn dòng dưới con trỏ, nếu không menu sẽ tác động nhầm dòng. -->
+                                <EventSetter Event="PreviewMouseRightButtonDown"
+                                             Handler="Row_PreviewMouseRightButtonDown" />
+                            </Style>
+                        </DataGrid.RowStyle>
+
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Xóa dòng" InputGestureText="Delete"
+                                          Click="RemoveSelected_Click" />
+                                <MenuItem Header="Nhân đôi dòng" Click="DuplicateSelected_Click" />
+                                <Separator />
+                                <MenuItem Header="Bỏ chọn ô ✓" Click="UncheckSelected_Click" />
+                                <MenuItem Header="Đánh dấu chọn ô ✓" Click="CheckSelected_Click" />
+                                <Separator />
+                                <MenuItem Header="Copy Name" Click="CopyName_Click" />
+                                <MenuItem Header="Copy ObjectId" Click="CopyObjectId_Click" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="✓" Binding="{Binding Include, UpdateSourceTrigger=PropertyChanged}" Width="34" />
 
@@ -184,7 +219,24 @@
                                 </DataGridTemplateColumn.CellEditingTemplate>
                             </DataGridTemplateColumn>
 
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="320" />
+                            <DataGridTemplateColumn Header="Name" Width="320">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="4,0"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <ComboBox IsEditable="True" IsTextSearchEnabled="False"
+                                                  StaysOpenOnEdit="True" MaxDropDownHeight="320"
+                                                  Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                                  ItemsSource="{Binding NameSuggestions}"
+                                                  TextBoxBase.TextChanged="NameCombo_TextChanged"
+                                                  ToolTip="Gõ để lọc. Với Column/View/Form: gõ tên bảng rồi dấu . hoặc | để app gợi ý tiếp trong phạm vi bảng đó." />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
 
                             <DataGridCheckBoxColumn Header="IncludeAll"
                                                     Binding="{Binding IncludeAll, UpdateSourceTrigger=PropertyChanged}"
@@ -258,6 +310,9 @@
                         <TextBlock Text="Nhật ký" FontWeight="Bold" VerticalAlignment="Center" />
                         <Button Content="Copy log" Style="{StaticResource Flat}" Margin="12,0,0,0" MinWidth="70"
                                 Padding="8,2" Command="{Binding CopyLogCommand}" />
+                        <Button Content="Mở thư mục log" Style="{StaticResource Flat}" MinWidth="100"
+                                Padding="8,2" Command="{Binding OpenLogFolderCommand}"
+                                ToolTip="Nhật ký được ghi ra file mỗi ngày trong %APPDATA%\DeployToSolution\logs" />
                     </StackPanel>
                 </Border>
                 <ListBox x:Name="LogList" ItemsSource="{Binding Log}" BorderThickness="0" FontFamily="Consolas"

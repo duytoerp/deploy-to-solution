@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,17 +42,20 @@ namespace DeployToSolution.ViewModels
             ConnectCommand = new RelayCommand(async _ => await ConnectAsync(), _ => !IsBusy);
             DisconnectCommand = new RelayCommand(_ => Disconnect(), _ => IsConnected && !IsBusy);
             RefreshSolutionsCommand = new RelayCommand(async _ => await LoadSolutionsAsync(), _ => IsConnected && !IsBusy);
-            ImportCsvCommand = new RelayCommand(_ => ImportCsv(), _ => !IsBusy);
+            ImportCsvCommand = new RelayCommand(_ => ImportList(), _ => !IsBusy);
+            DownloadTemplateCommand = new RelayCommand(_ => DownloadTemplate(), _ => !IsBusy);
             PasteCommand = new RelayCommand(_ => PasteFromClipboard(), _ => !IsBusy);
-            ExportCsvCommand = new RelayCommand(_ => ExportCsv(), _ => Rows.Count > 0);
-            AddRowCommand = new RelayCommand(_ => Rows.Add(new ComponentRow { Type = "Table" }), _ => !IsBusy);
+            ExportCsvCommand = new RelayCommand(_ => ExportList(), _ => Rows.Count > 0);
+            AddRowCommand = new RelayCommand(_ => AddRow(), _ => !IsBusy);
             ClearRowsCommand = new RelayCommand(_ => Rows.Clear(), _ => Rows.Count > 0 && !IsBusy);
             ResolveCommand = new RelayCommand(async _ => await ResolveAsync(), _ => IsConnected && !IsBusy && Rows.Count > 0);
             RunCommand = new RelayCommand(async _ => await RunAsync(false), _ => IsConnected && !IsBusy && Rows.Count > 0);
             DryRunCommand = new RelayCommand(async _ => await RunAsync(true), _ => IsConnected && !IsBusy && Rows.Count > 0);
             CancelCommand = new RelayCommand(_ => _cts?.Cancel(), _ => IsBusy);
             SaveReportCommand = new RelayCommand(_ => SaveReport(), _ => Rows.Count > 0);
+            DeployReportCommand = new RelayCommand(_ => ShowDeployReport(), _ => Rows.Count > 0);
             CopyLogCommand = new RelayCommand(_ => CopyLog(), _ => Log.Count > 0);
+            OpenLogFolderCommand = new RelayCommand(_ => OpenLogFolder());
             OpenVerificationCommand = new RelayCommand(_ => OpenBrowser(VerificationUri));
             SelectAllSolutionsCommand = new RelayCommand(_ => SetAllSolutions(true));
             SelectNoSolutionsCommand = new RelayCommand(_ => SetAllSolutions(false));
@@ -142,6 +146,7 @@ namespace DeployToSolution.ViewModels
         public RelayCommand DisconnectCommand { get; }
         public RelayCommand RefreshSolutionsCommand { get; }
         public RelayCommand ImportCsvCommand { get; }
+        public RelayCommand DownloadTemplateCommand { get; }
         public RelayCommand PasteCommand { get; }
         public RelayCommand ExportCsvCommand { get; }
         public RelayCommand AddRowCommand { get; }
@@ -151,7 +156,9 @@ namespace DeployToSolution.ViewModels
         public RelayCommand DryRunCommand { get; }
         public RelayCommand CancelCommand { get; }
         public RelayCommand SaveReportCommand { get; }
+        public RelayCommand DeployReportCommand { get; }
         public RelayCommand CopyLogCommand { get; }
+        public RelayCommand OpenLogFolderCommand { get; }
         public RelayCommand OpenVerificationCommand { get; }
         public RelayCommand SelectAllSolutionsCommand { get; }
         public RelayCommand SelectNoSolutionsCommand { get; }
@@ -357,12 +364,12 @@ namespace DeployToSolution.ViewModels
 
         // ---------- component list ----------
 
-        private void ImportCsv()
+        private void ImportList()
         {
             var dlg = new OpenFileDialog
             {
                 Title = "Chọn file danh sách component",
-                Filter = "CSV / TXT (*.csv;*.txt)|*.csv;*.txt|Tất cả (*.*)|*.*",
+                Filter = "Excel (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|CSV / TXT (*.csv;*.txt)|*.csv;*.txt|Tất cả (*.*)|*.*",
                 InitialDirectory = SafeDir(_settings.LastCsvPath)
             };
             if (dlg.ShowDialog() != true) return;
@@ -374,11 +381,49 @@ namespace DeployToSolution.ViewModels
                 foreach (var r in rows) Rows.Add(r);
                 _settings.LastCsvPath = dlg.FileName;
                 SaveSettings();
-                Good($"Đã nạp {rows.Count} dòng từ {Path.GetFileName(dlg.FileName)}.");
+
+                if (rows.Count == 0)
+                    Warn($"{Path.GetFileName(dlg.FileName)} không có dòng nào đọc được. " +
+                         "Với Excel, dữ liệu phải nằm ở sheet tên 'Components' hoặc sheet đầu tiên.");
+                else
+                    Good($"Đã nạp {rows.Count} dòng từ {Path.GetFileName(dlg.FileName)}.");
             }
             catch (Exception ex)
             {
                 Error("Đọc file thất bại: " + ex.Message);
+            }
+        }
+
+        /// <summary>Ghi file template Excel đã nhúng trong exe ra đĩa rồi mở lên.</summary>
+        private void DownloadTemplate()
+        {
+            var dlg = new SaveFileDialog
+            {
+                Title = "Lưu file template",
+                Filter = "Excel (*.xlsx)|*.xlsx",
+                FileName = "components-template.xlsx"
+            };
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                const string resource = "DeployToSolution.components-template.xlsx";
+                using var source = Assembly.GetExecutingAssembly().GetManifestResourceStream(resource);
+                if (source == null)
+                {
+                    Error("Không tìm thấy template nhúng trong ứng dụng.");
+                    return;
+                }
+
+                using (var target = File.Create(dlg.FileName))
+                    source.CopyTo(target);
+
+                Good($"Đã lưu template: {dlg.FileName}");
+                Process.Start(new ProcessStartInfo(dlg.FileName) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Error("Không lưu được template: " + ex.Message);
             }
         }
 
@@ -398,30 +443,148 @@ namespace DeployToSolution.ViewModels
             }
         }
 
-        private void ExportCsv()
+        private void ExportList()
         {
             var dlg = new SaveFileDialog
             {
-                Title = "Lưu danh sách component",
-                Filter = "CSV (*.csv)|*.csv",
-                FileName = "components.csv"
+                Title = "Xuất danh sách component",
+                Filter = "Excel (*.xlsx)|*.xlsx|CSV (*.csv)|*.csv",
+                FileName = "components.xlsx"
             };
             if (dlg.ShowDialog() != true) return;
-            CsvService.Save(dlg.FileName, Rows);
-            Good("Đã lưu " + dlg.FileName);
+
+            try
+            {
+                if (IsCsv(dlg.FileName))
+                {
+                    CsvService.Save(dlg.FileName, Rows);
+                }
+                else
+                {
+                    ExcelWriter.Write(dlg.FileName, BuildComponentWorkbook());
+                }
+
+                Good($"Đã xuất {Rows.Count} dòng: {dlg.FileName}");
+            }
+            catch (Exception ex)
+            {
+                Error("Xuất file thất bại: " + ex.Message);
+            }
         }
+
+        /// <summary>
+        /// Workbook có cấu trúc y như file template tải về: sheet Components kèm dropdown Type và Y/N,
+        /// cộng sheet danh mục làm nguồn cho dropdown. Xuất ra sửa tiếp rồi nạp lại được ngay.
+        /// </summary>
+        private List<ExcelSheet> BuildComponentWorkbook()
+        {
+            var types = (_catalog != null && _catalog.TypeNames.Count > 0)
+                ? _catalog.TypeNames.ToList()
+                : ComponentCatalog.FriendlyTypeNames.ToList();
+
+            var components = new List<IEnumerable<string>> { new[] { "Type", "Name", "IncludeAll" } };
+            components.AddRange(Rows.Select(r => new[] { r.Type, r.Name, r.IncludeAll ? "Y" : "N" }));
+
+            var catalogRows = new List<IEnumerable<string>> { new[] { "Type hợp lệ" } };
+            catalogRows.AddRange(types.Select(t => new[] { t }));
+
+            const string catalogSheet = "DanhMucType";
+
+            return new List<ExcelSheet>
+            {
+                new ExcelSheet
+                {
+                    Name = "Components",
+                    Rows = components,
+                    ColumnWidths = new double[] { 26, 62, 12 },
+                    Dropdowns =
+                    {
+                        new ExcelDropdown
+                        {
+                            Range = "A2:A1000",
+                            Source = $"{catalogSheet}!$A$2:$A${types.Count + 1}"
+                        },
+                        new ExcelDropdown { Range = "C2:C1000", Source = "\"Y,N\"" }
+                    }
+                },
+                new ExcelSheet
+                {
+                    Name = catalogSheet,
+                    Rows = catalogRows,
+                    ColumnWidths = new double[] { 30 }
+                }
+            };
+        }
+
+        private static bool IsCsv(string path) =>
+            Path.GetExtension(path).Equals(".csv", StringComparison.OrdinalIgnoreCase);
 
         private void SaveReport()
         {
             var dlg = new SaveFileDialog
             {
                 Title = "Lưu báo cáo kết quả",
-                Filter = "CSV (*.csv)|*.csv",
-                FileName = $"deploy-report-{DateTime.Now:yyyyMMdd-HHmm}.csv"
+                Filter = "Excel (*.xlsx)|*.xlsx|CSV (*.csv)|*.csv",
+                FileName = $"deploy-report-{DateTime.Now:yyyyMMdd-HHmm}.xlsx"
             };
             if (dlg.ShowDialog() != true) return;
-            File.WriteAllText(dlg.FileName, CsvService.ToReport(Rows), new UTF8Encoding(true));
-            Good("Đã lưu báo cáo " + dlg.FileName);
+
+            try
+            {
+                if (IsCsv(dlg.FileName))
+                {
+                    File.WriteAllText(dlg.FileName, CsvService.ToReport(Rows), new UTF8Encoding(true));
+                }
+                else
+                {
+                    var grid = new List<IEnumerable<string>>
+                    {
+                        new[] { "Type", "Name", "IncludeAll", "ComponentType", "ObjectId", "Trạng thái", "Chi tiết" }
+                    };
+                    grid.AddRange(Rows.Select(r => new[]
+                    {
+                        r.Type, r.Name, r.IncludeAll ? "Y" : "N",
+                        r.ComponentType < 0 ? "" : r.ComponentType.ToString(),
+                        r.ObjectId, r.StateText, r.Message
+                    }));
+
+                    ExcelWriter.Write(dlg.FileName, new[]
+                    {
+                        new ExcelSheet
+                        {
+                            Name = "KetQua",
+                            Rows = grid,
+                            ColumnWidths = new double[] { 22, 46, 11, 14, 38, 14, 70 }
+                        }
+                    });
+                }
+
+                Good("Đã lưu báo cáo " + dlg.FileName);
+            }
+            catch (Exception ex)
+            {
+                Error("Lưu báo cáo thất bại: " + ex.Message);
+            }
+        }
+
+        /// <summary>Bản tóm tắt gom theo loại để dán vào ticket deploy. Không cần kết nối.</summary>
+        private void ShowDeployReport()
+        {
+            try
+            {
+                var targets = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList();
+                var text = DeployReport.Build(Rows, _catalog, targets, EnvironmentUrl);
+                var grid = DeployReport.ToGrid(Rows, _catalog, targets, EnvironmentUrl);
+
+                var window = new ReportWindow(text, grid) { Owner = Application.Current?.MainWindow };
+                window.ShowDialog();
+
+                Info($"Đã dựng báo cáo deploy cho {Rows.Count(r => r.Include)} component.");
+            }
+            catch (Exception ex)
+            {
+                Error("Không dựng được báo cáo: " + ex.Message);
+            }
         }
 
         private void CopyLog()
@@ -434,9 +597,84 @@ namespace DeployToSolution.ViewModels
             catch (Exception ex) { Error(ex.Message); }
         }
 
+        private void OpenLogFolder()
+        {
+            try
+            {
+                var folder = Path.GetDirectoryName(SettingsStore.LogFile);
+                Directory.CreateDirectory(folder);
+                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+            }
+            catch (Exception ex) { Error(ex.Message); }
+        }
+
+        /// <summary>
+        /// Nạp và lọc gợi ý cho cột Name theo Type của dòng, gọi lại mỗi lần người dùng gõ.
+        /// Danh sách đầy đủ được cache trong catalog; ở đây chỉ lọc lại theo chữ đang gõ.
+        /// </summary>
+        public async Task LoadNameSuggestionsAsync(ComponentRow row, string currentText = null)
+        {
+            if (row == null || _catalog == null || !IsConnected) return;
+
+            var text = currentText ?? row.Name ?? "";
+            var key = _catalog.SuggestionKey(row.Type, text);
+            if (string.IsNullOrEmpty(key)) return;
+
+            List<string> all;
+            try
+            {
+                all = await _catalog.SuggestNamesAsync(row.Type, text, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // Ghi một lần cho mỗi khoá rồi thôi, tránh spam log theo từng phím gõ.
+                if (row.SuggestionKey != key)
+                {
+                    row.SuggestionKey = key;
+                    Info($"Không lấy được gợi ý cho Type '{row.Type}': {ex.Message}");
+                }
+                return;
+            }
+
+            row.SuggestionKey = key;
+
+            var matches = string.IsNullOrWhiteSpace(text)
+                ? all
+                : all.Where(n => n.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            var shown = matches.Take(200).ToList();
+
+            if (row.NameSuggestions.SequenceEqual(shown, StringComparer.Ordinal)) return;
+
+            row.NameSuggestions.Clear();
+            foreach (var n in shown) row.NameSuggestions.Add(n);
+        }
+
+        /// <summary>Báo cho view biết dòng vừa thêm, để cuộn tới và chọn sẵn.</summary>
+        public event Action<ComponentRow> RowAdded;
+
+        /// <summary>Dòng mới luôn nằm trên đầu để khỏi phải cuộn xuống cuối danh sách.</summary>
+        private void AddRow()
+        {
+            var row = new ComponentRow { Type = "Table" };
+            Rows.Insert(0, row);
+            RowAdded?.Invoke(row);
+        }
+
         public void RemoveRows(IEnumerable<ComponentRow> rows)
         {
             foreach (var r in rows.ToList()) Rows.Remove(r);
+        }
+
+        /// <summary>Chèn bản sao ngay dưới dòng gốc, tiện khi thêm nhiều component cùng loại.</summary>
+        public void DuplicateRows(IEnumerable<ComponentRow> rows)
+        {
+            foreach (var r in rows.ToList())
+            {
+                var at = Rows.IndexOf(r);
+                if (at < 0) continue;
+                Rows.Insert(at + 1, r.Clone());
+            }
         }
 
         // ---------- resolve + run ----------
@@ -585,8 +823,13 @@ namespace DeployToSolution.ViewModels
                             }
                             else
                             {
+                                // Chỉ Entity mới chấp nhận DoNotIncludeSubcomponents.
+                                bool? subcomponents = _catalog != null && row.ComponentType == _catalog.EntityComponentType
+                                    ? !row.IncludeAll
+                                    : (bool?)null;
+
                                 await _solutions.AddAsync(solution.UniqueName, row.ObjectId, row.ComponentType,
-                                    row.IncludeAll, AddRequiredComponents, _cts.Token);
+                                    subcomponents, AddRequiredComponents, _cts.Token);
                                 added++;
                                 var what = present ? "đã cập nhật (include all)" : "đã add";
                                 notes[row].Add($"{solution.UniqueName}: {what}");
@@ -676,16 +919,53 @@ namespace DeployToSolution.ViewModels
                     continue;
                 }
 
-                try
+                // Tài liệu không nói rõ SolutionComponent nhận objectid hay khoá chính của dòng
+                // solutioncomponent, nên thử cả hai và xác minh lại sau mỗi lần.
+                var candidates = new List<(string Label, string Id)>
                 {
-                    await _solutions.RemoveAsync(solution.UniqueName, stray.ObjectId, stray.ComponentType, _cts.Token);
-                    Good($"  [gỡ] MetadataForArchival \"{stray.Name}\" (componenttype {stray.ComponentType})");
-                    note.Add($"{solution.UniqueName}: đã gỡ MetadataForArchival");
+                    ("objectid", stray.ObjectId),
+                    ("solutioncomponentid", stray.SolutionComponentId)
+                };
+
+                var removed = false;
+                string lastProblem = null;
+
+                foreach (var candidate in candidates)
+                {
+                    if (string.IsNullOrEmpty(candidate.Id)) continue;
+
+                    try
+                    {
+                        await _solutions.RemoveAsync(
+                            solution.UniqueName, candidate.Id, stray.ComponentType, _cts.Token);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        lastProblem = $"gỡ bằng {candidate.Label} lỗi: {ex.Message}";
+                        Info($"  · archival: {lastProblem}");
+                        continue;
+                    }
+
+                    // RemoveSolutionComponent có thể trả 204 mà không gỡ gì, nên phải đọc lại solution.
+                    if (!await _solutions.IsInSolutionAsync(solutionId, stray.ObjectId, _cts.Token))
+                    {
+                        Good($"  [gỡ] MetadataForArchival \"{stray.Name}\" bằng {candidate.Label} " +
+                             "- xác nhận đã biến mất khỏi solution");
+                        note.Add($"{solution.UniqueName}: đã gỡ MetadataForArchival");
+                        removed = true;
+                        break;
+                    }
+
+                    lastProblem = $"gỡ bằng {candidate.Label} không báo lỗi nhưng component vẫn còn";
+                    Info($"  · archival: {lastProblem}");
                 }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
+
+                if (!removed)
                 {
-                    Warn($"  [không gỡ được] MetadataForArchival \"{stray.Name}\": {ex.Message}");
+                    Warn($"  [không gỡ được] MetadataForArchival \"{stray.Name}\" " +
+                         $"(componenttype {stray.ComponentType}, rootcomponentbehavior={stray.RootBehavior ?? "null"}). " +
+                         $"Lần cuối: {lastProblem ?? "không rõ"}");
                     note.Add($"{solution.UniqueName}: không gỡ được MetadataForArchival");
                 }
             }
@@ -741,6 +1021,8 @@ namespace DeployToSolution.ViewModels
 
         private void Write(LogLevel level, string text)
         {
+            SettingsStore.AppendLog($"{DateTime.Now:HH:mm:ss}  [{level}] {text}");
+
             void Add() => Log.Add(new LogLine { Level = level, Text = text });
             if (Application.Current?.Dispatcher.CheckAccess() == false)
                 Application.Current.Dispatcher.Invoke(Add);

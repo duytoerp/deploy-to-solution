@@ -43,7 +43,22 @@ Lần sau mở app: phiên đăng nhập, danh sách môi trường và các sol
 
 ---
 
-## 3. Định dạng file CSV
+## 3. Định dạng danh sách component
+
+**File mẫu:** bấm nút **Tải template** trong app — file Excel được nhúng sẵn trong exe, lưu ra đĩa
+rồi mở lên luôn. Bản trong repo: [`samples/components-template.xlsx`](samples/components-template.xlsx).
+Ba sheet: `Components` (điền vào đây, cột Type có dropdown), `Huong dan`, `DanhMucType`.
+
+Đưa vào app bằng 1 trong 2 cách:
+
+- **Nạp Excel / CSV:** chọn thẳng file `.xlsx` — app đọc sheet tên `Components`, không có thì lấy
+  sheet đầu tiên. **Không cần Save As CSV nữa.** File `.csv` / `.txt` vẫn nạp được như cũ.
+- **Dán từ Excel:** bôi đen vùng dữ liệu (kể cả dòng tiêu đề) → `Ctrl+C` → bấm **Dán từ Excel**.
+  Không cần lưu file.
+
+App đọc `.xlsx` bằng `ZipArchive` + `XDocument` có sẵn trong .NET — vẫn không cần thư viện ngoài.
+
+### Định dạng CSV
 
 ```csv
 Type,Name,IncludeAll
@@ -73,7 +88,7 @@ Form,hs_api_log|Information,N
 |------|--------------|-------|
 | `Table` | logical name, schema name hoặc display name | `hs_api_log` / `API Log` |
 | `Column` | `bang.cot` | `hs_api_log.hs_retry_count` |
-| `View` / `Form` / `Chart` | `bang|tên` (hoặc chỉ tên nếu không trùng) | `hs_api_log|Active API Logs` |
+| `View` / `Form` / `Chart` | `bang|tên`, thêm `|biến thể` nếu trùng | `hs_api_log|Information|Main` |
 | `Workflow` / `BPF` / `CloudFlow` | đúng tên process | `[WF][Invoice] Update Canceled Date` |
 | `PluginAssembly` | tên assembly | `VUS.Core.Plugins` |
 | `PluginStep` | tên step (cột **Name** trong Plug-in steps) | `VUS.Core.Plugins.PreUpdateInvoice` |
@@ -84,7 +99,45 @@ Form,hs_api_log|Information,N
 | `SecurityRole` | tên role (lấy role gốc ở root business unit) | `VUS Core User` |
 | `Relationship` | schema name của relationship | `hs_account_hs_api_log` |
 
-**Trùng tên?** Dán thẳng **GUID** vào cột `Name` — app nhận GUID và bỏ qua bước tìm kiếm.
+### Gợi ý tên tự động
+
+Bấm vào ô **Name** của một dòng, app sẽ nạp danh sách tên có thật trong môi trường **đúng theo Type**
+của dòng đó, rồi đổ vào dropdown (gõ để lọc). Nạp lười — chỉ truy vấn khi bạn thật sự sửa ô đó,
+và cache lại cho các dòng sau cùng Type.
+
+| Type | Gợi ý gì |
+|------|----------|
+| `Table` | logical name của mọi table |
+| `Column` / `Key` | chưa gõ bảng thì gợi ý `hs_api_log.` để chọn bảng trước; gõ xong bảng, bấm lại vào ô thì gợi ý đủ `bảng.cột` |
+| `View` / `Form` / `Chart` | gợi ý sẵn dạng `bảng|tên`, dán vào là chạy |
+| `Choice` | tên global choice |
+| `Relationship` | schema name |
+| còn lại | tên lấy từ chính bảng tương ứng (workflow, plugin step, web resource...) |
+
+Danh sách ưu tiên lọc `ismanaged eq false` (component của bạn, không lẫn hàng ngàn bản ghi hệ thống)
+và giới hạn 2000 dòng. Component managed vẫn gõ tay được như thường — gợi ý chỉ là tiện ích,
+không phải giới hạn.
+
+### Form và View trùng tên
+
+Một bảng thường có nhiều form **cùng tên** khác loại (Main, QuickView, QuickCreate, Card...),
+view cũng vậy (MainView, QuickFind, Lookup...). Khi đó ghi thêm đoạn thứ ba:
+
+```
+Form,hs_api_log|Information|Main
+Form,hs_api_log|Information|QuickView
+View,hs_api_log|Active API Logs|MainView
+```
+
+Biến thể form: `Main` `QuickView` `QuickCreate` `Card` `Dialog` `Dashboard` `Preview`
+`MobileExpress` `TaskFlow` `MainInteractive` `ContextualDashboard` — hoặc điền thẳng số (`2` = Main).
+
+Biến thể view: `MainView` `AdvancedFind` `SubGrid` `QuickFind` `Lookup` `Reporting` ...
+
+Dropdown gợi ý đã sinh sẵn dạng 3 đoạn nên chọn từ đó là không bao giờ mơ hồ.
+Bản ghi đã xoá (`componentstate` 2/3) bị loại khỏi kết quả tìm kiếm.
+
+**Trùng tên ở loại khác?** Dán thẳng **GUID** vào cột `Name` — app nhận GUID và bỏ qua bước tìm kiếm.
 Khi trùng, app in sẵn danh sách ứng viên kèm GUID ở cột *Chi tiết* để bạn copy.
 
 ### Type nhận những giá trị nào
@@ -109,6 +162,7 @@ Nếu một loại lạ chưa có sẵn, điền **số component type** vào c�
 | **Chạy thử** | Liệt kê chính xác sẽ add gì vào solution nào. **Không ghi gì.** |
 | **ADD VÀO SOLUTION** | Add thật, có hộp thoại xác nhận liệt kê các solution đích. |
 | **Hủy** | Dừng giữa chừng; những gì đã add vẫn giữ nguyên. |
+| **Xuất Excel** | Xuất danh sách đang có ra `.xlsx` (đúng 3 cột như template, nạp lại được ngay). Chọn `.csv` trong hộp thoại lưu nếu muốn CSV. |
 | **Lưu báo cáo** | Xuất CSV đầy đủ: type, name, objectid, trạng thái, thông báo — đính kèm ticket hotfix. |
 | **Add required components** | Mặc định **tắt**. Bật lên nếu muốn Dataverse tự kéo theo component phụ thuộc. |
 | **Gỡ MetadataForArchival** | Mặc định **bật**. Xem mục 5 bên dưới. |

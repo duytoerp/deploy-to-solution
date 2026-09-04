@@ -64,6 +64,20 @@ namespace DeployToSolution.Services
             catch { return null; }
         }
 
+        /// <summary>Nhật ký được ghi ra file để lần sau chẩn đoán không phải chụp màn hình.</summary>
+        public static string LogFile =>
+            Path.Combine(Dir, "logs", $"log-{DateTime.Now:yyyyMMdd}.txt");
+
+        public static void AppendLog(string line)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(LogFile));
+                File.AppendAllText(LogFile, line + Environment.NewLine, new System.Text.UTF8Encoding(true));
+            }
+            catch { /* ghi log không bao giờ được làm hỏng một lần chạy */ }
+        }
+
         public static void ClearRefreshToken()
         {
             try { if (File.Exists(TokenFile)) File.Delete(TokenFile); } catch { }

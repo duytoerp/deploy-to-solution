@@ -32,7 +32,30 @@ namespace DeployToSolution.Services
             public string[] ExtraSelect = Array.Empty<string>();
             /// <summary>Field holding the owning table, used when the CSV name is written as "table|name".</summary>
             public string ParentField;
+            /// <summary>Field phân biệt các bản ghi trùng tên trong cùng một bảng (loại form, loại view).</summary>
+            public string VariantField;
+            /// <summary>Nhãn đọc được cho VariantField, dùng cả khi hiển thị lẫn khi người dùng gõ vào Name.</summary>
+            public Dictionary<int, string> VariantLabels;
         }
+
+        // systemform.type
+        private static readonly Dictionary<int, string> FormTypes = new()
+        {
+            [0] = "Dashboard", [1] = "AppointmentBook", [2] = "Main", [3] = "MiniCampaignBO",
+            [4] = "Preview", [5] = "MobileExpress", [6] = "QuickView", [7] = "QuickCreate",
+            [8] = "Dialog", [9] = "TaskFlow", [10] = "InteractionCentricDashboard", [11] = "Card",
+            [12] = "MainInteractive", [13] = "ContextualDashboard", [100] = "Other",
+            [101] = "MainBackup", [102] = "AppointmentBookBackup", [103] = "PowerBIDashboard"
+        };
+
+        // savedquery.querytype
+        private static readonly Dictionary<int, string> QueryTypes = new()
+        {
+            [0] = "MainView", [1] = "AdvancedFind", [2] = "SubGrid", [4] = "QuickFind",
+            [8] = "Reporting", [16] = "OfflineFilters", [32] = "Lookup", [64] = "AppointmentBook",
+            [128] = "OutlookFilters", [256] = "AddressBookFilters", [1024] = "OutlookTemplate",
+            [2048] = "InteractiveWorkflow", [4096] = "OfflineTemplate", [8192] = "CustomDefined"
+        };
 
         // Query-based resolvers, keyed by the normalized component type label.
         private static readonly Dictionary<string, QueryDef> Queries = new(StringComparer.Ordinal)
@@ -49,13 +72,15 @@ namespace DeployToSolution.Services
             {
                 EntitySet = "savedqueries", IdField = "savedqueryid",
                 NameFields = new[] { "name" }, ParentField = "returnedtypecode",
-                ExtraSelect = new[] { "returnedtypecode" }
+                VariantField = "querytype", VariantLabels = QueryTypes,
+                ExtraSelect = new[] { "returnedtypecode", "querytype", "componentstate" }
             },
             ["systemform"] = new QueryDef
             {
                 EntitySet = "systemforms", IdField = "formid",
                 NameFields = new[] { "name" }, ParentField = "objecttypecode",
-                ExtraSelect = new[] { "objecttypecode" }
+                VariantField = "type", VariantLabels = FormTypes,
+                ExtraSelect = new[] { "objecttypecode", "type", "componentstate" }
             },
             ["savedqueryvisualization"] = new QueryDef
             {
@@ -291,6 +316,16 @@ namespace DeployToSolution.Services
 
         public ComponentCatalog(DataverseClient client) => _client = client;
 
+        /// <summary>Tên loại theo cách gọi quen của team, dùng cho dropdown kể cả khi chưa kết nối.</summary>
+        public static readonly string[] FriendlyTypeNames =
+        {
+            "Table", "Column", "Choice", "View", "Form", "Chart", "Workflow", "BPF", "CloudFlow",
+            "PluginAssembly", "PluginType", "PluginStep", "WebResource", "App", "CanvasApp",
+            "SecurityRole", "ColumnSecurityProfile", "ConnectionReference", "EnvironmentVariable",
+            "Relationship", "Key", "CustomApi", "CustomControl", "SiteMap", "ServiceEndpoint",
+            "Report", "EmailTemplate", "SLA"
+        };
+
         public List<ComponentTypeDef> Types { get; } = new List<ComponentTypeDef>();
 
         /// <summary>Component type code for a table, as this environment numbers it.</summary>
@@ -349,13 +384,7 @@ namespace DeployToSolution.Services
         {
             TypeNames.Clear();
             // Friendly names first: these are what a hotfix checklist actually says.
-            foreach (var friendly in new[]
-                     {
-                         "Table", "Column", "Choice", "View", "Form", "Chart", "Workflow", "BPF", "CloudFlow",
-                         "PluginAssembly", "PluginType", "PluginStep", "WebResource", "App", "CanvasApp",
-                         "SecurityRole", "ConnectionReference", "EnvironmentVariable", "Relationship",
-                         "CustomApi", "CustomControl", "SiteMap", "ServiceEndpoint", "Report"
-                     })
+            foreach (var friendly in FriendlyTypeNames)
             {
                 if (Aliases.TryGetValue(ComponentTypeDef.Normalize(friendly), out var key) && _byKey.ContainsKey(key))
                     TypeNames.Add(friendly);
@@ -368,6 +397,16 @@ namespace DeployToSolution.Services
 
         private static string Pretty(string key) =>
             key.Length == 0 ? key : char.ToUpperInvariant(key[0]) + key.Substring(1);
+
+        /// <summary>
+        /// Khoá chuẩn của một Type chỉ dựa vào bảng bí danh - dùng được khi chưa kết nối môi trường,
+        /// lúc đó chưa có option set componenttype để tra.
+        /// </summary>
+        public static string CanonicalKey(string typeInput)
+        {
+            var norm = ComponentTypeDef.Normalize(typeInput);
+            return Aliases.TryGetValue(norm, out var key) ? key : norm;
+        }
 
         /// <summary>Maps whatever the user typed onto a component type, via alias then exact label.</summary>
         public ComponentTypeDef MatchType(string userInput)
@@ -433,10 +472,13 @@ namespace DeployToSolution.Services
 
         // ---------- metadata resolvers ----------
 
-        private async Task<ResolveResult> ResolveEntityAsync(string name, ComponentTypeDef type, CancellationToken ct)
-        {
+        private async Task<List<JsonElement>> EnsureEntitiesAsync(CancellationToken ct) =>
             _entityCache ??= await _client.GetAllAsync(
                 "EntityDefinitions?$select=MetadataId,LogicalName,SchemaName,DisplayName", ct).ConfigureAwait(false);
+
+        private async Task<ResolveResult> ResolveEntityAsync(string name, ComponentTypeDef type, CancellationToken ct)
+        {
+            await EnsureEntitiesAsync(ct).ConfigureAwait(false);
 
             var hits = _entityCache.Where(e =>
                 Eq(Str(e, "LogicalName"), name) ||
@@ -474,20 +516,24 @@ namespace DeployToSolution.Services
             return Ambiguous(hits.Select(a => $"{Str(a, "LogicalName")} = {Str(a, "MetadataId")}"));
         }
 
+        private async Task<List<JsonElement>> EnsureOptionSetsAsync(CancellationToken ct)
+        {
+            if (_optionSetCache != null) return _optionSetCache;
+            try
+            {
+                _optionSetCache = await _client.GetAllAsync(
+                    "GlobalOptionSetDefinitions?$select=MetadataId,Name,DisplayName", ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                _optionSetCache = await _client.GetAllAsync("GlobalOptionSetDefinitions", ct).ConfigureAwait(false);
+            }
+            return _optionSetCache;
+        }
+
         private async Task<ResolveResult> ResolveOptionSetAsync(string name, ComponentTypeDef type, CancellationToken ct)
         {
-            if (_optionSetCache == null)
-            {
-                try
-                {
-                    _optionSetCache = await _client.GetAllAsync(
-                        "GlobalOptionSetDefinitions?$select=MetadataId,Name,DisplayName", ct).ConfigureAwait(false);
-                }
-                catch
-                {
-                    _optionSetCache = await _client.GetAllAsync("GlobalOptionSetDefinitions", ct).ConfigureAwait(false);
-                }
-            }
+            await EnsureOptionSetsAsync(ct).ConfigureAwait(false);
 
             var hits = _optionSetCache.Where(o =>
                 Eq(Str(o, "Name"), name) || Eq(Label(o, "DisplayName"), name)).ToList();
@@ -537,13 +583,24 @@ namespace DeployToSolution.Services
             if (!Queries.TryGetValue(type.Key, out var q))
                 return Fail($"Chưa hỗ trợ tự tìm ID cho type '{type.Label}'. Hãy điền thẳng GUID vào cột Name.");
 
-            string parentValue = null;
+            // Dạng đầy đủ: "bang|ten|BienThe", ví dụ hs_api_log|Information|Main
+            string parentValue = null, variantValue = null;
             var lookup = name;
             if (q.ParentField != null && name.Contains('|'))
             {
-                var parts = name.Split('|', 2);
+                var parts = name.Split('|');
                 parentValue = parts[0].Trim();
-                lookup = parts[1].Trim();
+                lookup = parts.Length > 1 ? parts[1].Trim() : "";
+                if (parts.Length > 2) variantValue = parts[2].Trim();
+            }
+
+            int? variantCode = null;
+            if (variantValue != null && q.VariantField != null)
+            {
+                variantCode = ParseVariant(q, variantValue);
+                if (variantCode == null)
+                    return Fail($"Biến thể '{variantValue}' không hợp lệ. Chọn một trong: " +
+                                string.Join(", ", q.VariantLabels.Values));
             }
 
             var select = new List<string> { q.IdField };
@@ -555,6 +612,7 @@ namespace DeployToSolution.Services
             filters.Add($"({nameOr})");
             if (!string.IsNullOrEmpty(q.FixedFilter)) filters.Add(q.FixedFilter);
             if (parentValue != null) filters.Add($"{q.ParentField} eq '{DataverseClient.Esc(parentValue)}'");
+            if (variantCode != null) filters.Add($"{q.VariantField} eq {variantCode}");
 
             var url = $"{q.EntitySet}?$select={string.Join(",", select.Distinct())}" +
                       $"&$filter={F(string.Join(" and ", filters))}&$top=25";
@@ -584,13 +642,20 @@ namespace DeployToSolution.Services
                 }
             }
 
+            // Bản ghi đã xoá (componentstate 2/3) vẫn nằm trong bảng, không bao giờ được add.
+            hits = hits.Where(h => !IsDeletedComponent(h)).ToList();
+
             if (hits.Count == 1)
                 return Ok(Str(hits[0], q.IdField), type, Describe(hits[0], q));
 
             if (hits.Count == 0)
                 return NotFound(name, type, await SuggestAsync(q, lookup, ct).ConfigureAwait(false));
 
-            return Ambiguous(hits.Select(h => $"{Describe(h, q)} = {Str(h, q.IdField)}"));
+            var hint = q.VariantField != null && parentValue != null
+                ? $"Hoặc ghi rõ biến thể: {parentValue}|{lookup}|Main"
+                : null;
+
+            return Ambiguous(hits.Select(h => $"{Describe(h, q)} = {Str(h, q.IdField)}"), hint);
         }
 
         private async Task<IEnumerable<string>> SuggestAsync(QueryDef q, string lookup, CancellationToken ct)
@@ -615,11 +680,219 @@ namespace DeployToSolution.Services
         private static string Describe(JsonElement row, QueryDef q)
         {
             var main = q.NameFields.Select(f => Str(row, f)).FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? "?";
-            var extra = q.ExtraSelect
-                .Select(f => Str(row, f))
-                .Where(v => !string.IsNullOrEmpty(v))
-                .ToList();
+
+            var extra = new List<string>();
+            if (q.ParentField != null)
+            {
+                var parent = Str(row, q.ParentField);
+                if (!string.IsNullOrEmpty(parent)) extra.Add(parent);
+            }
+            if (q.VariantField != null)
+            {
+                var label = VariantLabel(row, q);
+                if (!string.IsNullOrEmpty(label)) extra.Add(label);
+            }
+            foreach (var f in q.ExtraSelect)
+            {
+                if (f == q.ParentField || f == q.VariantField || f == "componentstate") continue;
+                var v = Str(row, f);
+                if (!string.IsNullOrEmpty(v)) extra.Add(v);
+            }
+
             return extra.Count == 0 ? main : $"{main} [{string.Join("/", extra)}]";
+        }
+
+        /// <summary>Nhãn đọc được của biến thể, ví dụ type=2 -> "Main".</summary>
+        private static string VariantLabel(JsonElement row, QueryDef q)
+        {
+            if (q.VariantField == null) return null;
+            var raw = Str(row, q.VariantField);
+            if (string.IsNullOrEmpty(raw)) return null;
+            return int.TryParse(raw, out var code) && q.VariantLabels != null &&
+                   q.VariantLabels.TryGetValue(code, out var label)
+                ? label
+                : raw;
+        }
+
+        /// <summary>Chấp nhận cả nhãn ("Main") lẫn số ("2") ở đoạn thứ ba của Name.</summary>
+        private static int? ParseVariant(QueryDef q, string text)
+        {
+            if (q.VariantLabels != null)
+                foreach (var kv in q.VariantLabels)
+                    if (string.Equals(kv.Value, text, StringComparison.OrdinalIgnoreCase))
+                        return kv.Key;
+            return int.TryParse(text, out var n) ? n : (int?)null;
+        }
+
+        private static bool IsDeletedComponent(JsonElement row)
+        {
+            var state = Str(row, "componentstate");
+            return int.TryParse(state, out var code) && (code == 2 || code == 3);
+        }
+
+        // ---------- gợi ý tên ----------
+
+        private readonly Dictionary<string, List<string>> _suggestCache =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        private const int SuggestLimit = 2000;
+
+        /// <summary>
+        /// Danh sách tên gợi ý cho cột Name, tuỳ theo Type của dòng. Nạp lười và cache lại,
+        /// vì mỗi loại là một truy vấn riêng lên môi trường.
+        /// </summary>
+        public async Task<List<string>> SuggestNamesAsync(string typeInput, string currentName, CancellationToken ct)
+        {
+            var type = MatchType(typeInput);
+            if (type == null) return new List<string>();
+
+            var key = SuggestionKey(type, currentName);
+            if (_suggestCache.TryGetValue(key, out var cached)) return cached;
+
+            var names = await BuildSuggestionsAsync(type, currentName, ct).ConfigureAwait(false);
+
+            names = names
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Take(SuggestLimit)
+                .ToList();
+
+            _suggestCache[key] = names;
+            return names;
+        }
+
+        // Những loại mà gợi ý chỉ có nghĩa trong phạm vi một bảng.
+        private static readonly Dictionary<string, char> TableScoped = new(StringComparer.Ordinal)
+        {
+            ["attribute"] = '.',
+            ["entitykey"] = '.',
+            ["savedquery"] = '|',
+            ["systemform"] = '|',
+            ["savedqueryvisualization"] = '|'
+        };
+
+        /// <summary>Bảng mà người dùng đã gõ ở đầu ô Name, nếu loại này thuộc phạm vi một bảng.</summary>
+        private static bool TryTableScope(ComponentTypeDef type, string currentName, out string table)
+        {
+            table = null;
+            if (type == null || !TableScoped.TryGetValue(type.Key, out var sep)) return false;
+
+            var text = currentName ?? "";
+            var at = text.IndexOf(sep);
+            if (at <= 0) return false;
+
+            table = text.Substring(0, at).Trim();
+            // Tên bảng quá ngắn thường là đang gõ dở, đừng bắn truy vấn chắc chắn hỏng.
+            return table.Length >= 3;
+        }
+
+        /// <summary>Gợi ý của Column/View/Form phụ thuộc bảng đã gõ, nên khoá cache phải kèm bảng đó.</summary>
+        public string SuggestionKey(ComponentTypeDef type, string currentName)
+        {
+            if (type == null) return "";
+            return TryTableScope(type, currentName, out var table) ? $"{type.Key}:{table}" : type.Key;
+        }
+
+        public string SuggestionKey(string typeInput, string currentName) =>
+            SuggestionKey(MatchType(typeInput), currentName);
+
+        private async Task<List<string>> BuildSuggestionsAsync(ComponentTypeDef type, string currentName, CancellationToken ct)
+        {
+            switch (type.Key)
+            {
+                case "entity":
+                    return (await EnsureEntitiesAsync(ct).ConfigureAwait(false))
+                        .Select(e => Str(e, "LogicalName")).ToList();
+
+                case "attribute":
+                case "entitykey":
+                {
+                    // Chưa gõ bảng thì gợi ý "bảng." để chọn bảng trước; gõ xong bảng thì gợi ý cột của bảng đó.
+                    if (!TryTableScope(type, currentName, out var table))
+                        return (await EnsureEntitiesAsync(ct).ConfigureAwait(false))
+                            .Select(e => Str(e, "LogicalName") + ".").ToList();
+
+                    var path = type.Key == "attribute" ? "Attributes" : "Keys";
+                    var rows = await _client.GetAllAsync(
+                        $"EntityDefinitions(LogicalName='{DataverseClient.Esc(table)}')/{path}?$select=LogicalName",
+                        ct).ConfigureAwait(false);
+                    return rows.Select(a => $"{table}.{Str(a, "LogicalName")}").ToList();
+                }
+
+                case "savedquery":
+                case "systemform":
+                case "savedqueryvisualization":
+                {
+                    // Cả môi trường có hàng ngàn view/form, liệt kê hết là vô dụng.
+                    // Chưa gõ bảng thì gợi ý "bảng|", gõ rồi thì chỉ lấy view/form của đúng bảng đó.
+                    if (!TryTableScope(type, currentName, out var owner))
+                        return (await EnsureEntitiesAsync(ct).ConfigureAwait(false))
+                            .Select(e => Str(e, "LogicalName") + "|").ToList();
+
+                    return await QuerySuggestionsAsync(type, owner, ct).ConfigureAwait(false);
+                }
+
+                case "optionset":
+                    return (await EnsureOptionSetsAsync(ct).ConfigureAwait(false))
+                        .Select(o => Str(o, "Name")).ToList();
+
+                case "entityrelationship":
+                case "relationship":
+                    _relationshipCache ??= await _client.GetAllAsync(
+                        "RelationshipDefinitions?$select=MetadataId,SchemaName", ct).ConfigureAwait(false);
+                    return _relationshipCache.Select(r => Str(r, "SchemaName")).ToList();
+
+                default:
+                    return await QuerySuggestionsAsync(type, null, ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task<List<string>> QuerySuggestionsAsync(ComponentTypeDef type, string ownerTable, CancellationToken ct)
+        {
+            if (!Queries.TryGetValue(type.Key, out var q)) return new List<string>();
+
+            var nameField = q.NameFields[0];
+            var fields = new List<string> { nameField };
+            if (q.ParentField != null) fields.Add(q.ParentField);
+            if (q.VariantField != null) fields.Add(q.VariantField);
+            var select = string.Join(",", fields);
+
+            var baseFilters = new List<string>();
+            if (!string.IsNullOrEmpty(q.FixedFilter)) baseFilters.Add(q.FixedFilter);
+            if (!string.IsNullOrEmpty(ownerTable) && q.ParentField != null)
+                baseFilters.Add($"{q.ParentField} eq '{DataverseClient.Esc(ownerTable)}'");
+
+            // Hotfix hầu như chỉ đụng component unmanaged; lọc bớt hàng ngàn bản ghi hệ thống.
+            var withManaged = new List<string>(baseFilters) { "ismanaged eq false" };
+
+            foreach (var filters in new[] { withManaged, baseFilters })
+            {
+                var url = $"{q.EntitySet}?$select={select}&$orderby={nameField}&$top={SuggestLimit}";
+                if (filters.Count > 0) url += $"&$filter={F(string.Join(" and ", filters))}";
+
+                try
+                {
+                    var rows = await _client.GetAllAsync(url, ct).ConfigureAwait(false);
+                    return rows.Select(r =>
+                    {
+                        var name = Str(r, nameField);
+                        if (q.ParentField == null) return name;
+
+                        var parent = Str(r, q.ParentField);
+                        if (string.IsNullOrEmpty(parent)) return name;
+
+                        // Kèm luôn biến thể: form/view hay trùng tên trong cùng một bảng.
+                        var variant = VariantLabel(r, q);
+                        return string.IsNullOrEmpty(variant)
+                            ? $"{parent}|{name}"
+                            : $"{parent}|{name}|{variant}";
+                    }).ToList();
+                }
+                catch (DataverseException) { /* thử lại không lọc ismanaged */ }
+            }
+
+            return new List<string>();
         }
 
         // ---------- helpers ----------
@@ -644,11 +917,12 @@ namespace DeployToSolution.Services
             return new ResolveResult { State = RowState.NotFound, Message = sb.ToString() };
         }
 
-        private static ResolveResult Ambiguous(IEnumerable<string> candidates) => new ResolveResult
+        private static ResolveResult Ambiguous(IEnumerable<string> candidates, string hint = null)
         {
-            State = RowState.Ambiguous,
-            Message = "Trùng tên, hãy dán GUID vào cột Name: " + string.Join(" | ", candidates.Take(5))
-        };
+            var message = "Trùng tên. " + (hint == null ? "" : hint + ". ") +
+                          "Hoặc dán GUID vào cột Name: " + string.Join(" | ", candidates.Take(5));
+            return new ResolveResult { State = RowState.Ambiguous, Message = message };
+        }
 
         private static bool SplitQualified(string name, out string parent, out string child)
         {

@@ -14,6 +14,10 @@ namespace DeployToSolution.Services
         public string ObjectId { get; set; }
         public int ComponentType { get; set; }
         public string Name { get; set; }
+        /// <summary>rootcomponentbehavior của dòng solutioncomponent (0 = include subcomponents, 1 = do not include, 2 = include as shell).</summary>
+        public string RootBehavior { get; set; }
+        /// <summary>Khoá chính của chính dòng solutioncomponent - phương án dự phòng khi gỡ.</summary>
+        public string SolutionComponentId { get; set; }
     }
 
     /// <summary>Kết quả dò component archival: gỡ được gì, và vì sao không gỡ được.</summary>
@@ -93,25 +97,39 @@ namespace DeployToSolution.Services
             return rows.Count > 0;
         }
 
+        /// <summary>
+        /// <paramref name="doNotIncludeSubcomponents"/> chỉ được gửi cho component gốc là Entity;
+        /// gửi kèm cho PluginStep, Workflow... sẽ bị Dataverse từ chối, nên truyền null để bỏ hẳn khoá đó.
+        /// </summary>
         public Task AddAsync(string solutionUniqueName, string objectId, int componentType,
-            bool includeAllSubcomponents, bool addRequiredComponents, CancellationToken ct)
+            bool? doNotIncludeSubcomponents, bool addRequiredComponents, CancellationToken ct)
         {
             var payload = new Dictionary<string, object>
             {
                 ["ComponentId"] = objectId,
                 ["ComponentType"] = componentType,
                 ["SolutionUniqueName"] = solutionUniqueName,
-                ["AddRequiredComponents"] = addRequiredComponents,
-                ["DoNotIncludeSubcomponents"] = !includeAllSubcomponents
+                ["AddRequiredComponents"] = addRequiredComponents
             };
+            if (doNotIncludeSubcomponents.HasValue)
+                payload["DoNotIncludeSubcomponents"] = doNotIncludeSubcomponents.Value;
+
             return _client.PostActionAsync("AddSolutionComponent", payload, ct);
         }
 
-        public Task RemoveAsync(string solutionUniqueName, string objectId, int componentType, CancellationToken ct)
+        /// <summary>
+        /// RemoveSolutionComponent KHÔNG cùng chữ ký với AddSolutionComponent: nó nhận tham số
+        /// SolutionComponent kiểu entity reference chứ không phải ComponentId kiểu Guid.
+        /// </summary>
+        public Task RemoveAsync(string solutionUniqueName, string componentRefId, int componentType, CancellationToken ct)
         {
             var payload = new Dictionary<string, object>
             {
-                ["ComponentId"] = objectId,
+                ["SolutionComponent"] = new Dictionary<string, object>
+                {
+                    ["@odata.type"] = "Microsoft.Dynamics.CRM.solutioncomponent",
+                    ["solutioncomponentid"] = componentRefId
+                },
                 ["ComponentType"] = componentType,
                 ["SolutionUniqueName"] = solutionUniqueName
             };
@@ -186,17 +204,35 @@ namespace DeployToSolution.Services
                                $"(isavailableforarchival={available}, isreadyforarchival=False, " +
                                $"statecode={state ?? "?"}) -> sẽ gỡ khỏi solution");
 
-                List<JsonElement> inSolution;
-                try
+                // Cột chẩn đoán không có trên mọi phiên bản Dataverse, nên thử từ giàu tới nghèo
+                // thay vì để một cột lạ làm hỏng cả bước gỡ.
+                List<JsonElement> inSolution = null;
+                string lastError = null;
+                foreach (var select in new[]
+                         {
+                             "solutioncomponentid,componenttype,rootcomponentbehavior",
+                             "solutioncomponentid,componenttype"
+                         })
                 {
-                    inSolution = await _client.GetAllAsync(
-                        "solutioncomponents?$select=componenttype" +
-                        $"&$filter=_solutionid_value eq {solutionId} and objectid eq {kv.Key}",
-                        ct).ConfigureAwait(false);
+                    try
+                    {
+                        inSolution = await _client.GetAllAsync(
+                            $"solutioncomponents?$select={select}" +
+                            $"&$filter=_solutionid_value eq {solutionId} and objectid eq {kv.Key}",
+                            ct).ConfigureAwait(false);
+                        lastError = null;
+                        break;
+                    }
+                    catch (DataverseException ex)
+                    {
+                        inSolution = null;
+                        lastError = ex.Message;
+                    }
                 }
-                catch (DataverseException ex)
+
+                if (inSolution == null)
                 {
-                    scan.Notes.Add($"không đọc được solutioncomponents cho '{name}': {ex.Message}");
+                    scan.Notes.Add($"không đọc được solutioncomponents cho '{name}': {lastError}");
                     continue;
                 }
 
@@ -210,16 +246,34 @@ namespace DeployToSolution.Services
                 {
                     if (!c.TryGetProperty("componenttype", out var code) || code.ValueKind != JsonValueKind.Number)
                         continue;
+
+                    var behavior = Get(c, "rootcomponentbehavior");
+
+                    scan.Notes.Add($"'{name}' có trong solution: componenttype={code.GetInt32()}, " +
+                                   $"rootcomponentbehavior={behavior ?? "null"}");
+
                     scan.Removable.Add(new StrayComponent
                     {
                         ObjectId = kv.Key,
                         ComponentType = code.GetInt32(),
-                        Name = name
+                        Name = name,
+                        RootBehavior = behavior,
+                        SolutionComponentId = Get(c, "solutioncomponentid")
                     });
                 }
             }
 
             return scan;
+        }
+
+        /// <summary>Đọc lại solution sau khi gỡ, để phân biệt "Remove trả về OK" với "thật sự đã biến mất".</summary>
+        public async Task<bool> IsInSolutionAsync(string solutionId, string objectId, CancellationToken ct)
+        {
+            var rows = await _client.GetAllAsync(
+                "solutioncomponents?$select=solutioncomponentid" +
+                $"&$filter=_solutionid_value eq {solutionId} and objectid eq {objectId}",
+                ct).ConfigureAwait(false);
+            return rows.Count > 0;
         }
 
         private static bool IsTrue(JsonElement el, string prop)

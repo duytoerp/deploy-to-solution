@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Windows.Media;
 using DeployToSolution.Models;
 
@@ -37,6 +38,12 @@ namespace DeployToSolution.Models
 
         /// <summary>Tên thật khớp được lúc resolve (với Table là logical name) - dùng để dò component phụ.</summary>
         public string MatchedName { get; set; }
+
+        /// <summary>Gợi ý cho cột Name, nạp theo Type khi người dùng bấm vào ô.</summary>
+        public ObservableCollection<string> NameSuggestions { get; } = new ObservableCollection<string>();
+
+        /// <summary>Khoá của mẻ gợi ý đang giữ, để không nạp lại cùng một danh sách.</summary>
+        public string SuggestionKey { get; set; }
 
         public int ComponentType { get => _componentType; set => Set(ref _componentType, value); }
 
