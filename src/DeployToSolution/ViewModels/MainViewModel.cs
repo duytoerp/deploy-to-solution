@@ -59,6 +59,7 @@ namespace DeployToSolution.ViewModels
             OpenVerificationCommand = new RelayCommand(_ => OpenBrowser(VerificationUri));
             SelectAllSolutionsCommand = new RelayCommand(_ => SetAllSolutions(true));
             SelectNoSolutionsCommand = new RelayCommand(_ => SetAllSolutions(false));
+            UnselectSolutionCommand = new RelayCommand(p => { if (p is SolutionTarget s) s.Enabled = false; });
 
             Info("Sẵn sàng. Nhập URL môi trường rồi bấm Kết nối.");
         }
@@ -67,6 +68,17 @@ namespace DeployToSolution.ViewModels
 
         public ObservableCollection<ComponentRow> Rows { get; } = new ObservableCollection<ComponentRow>();
         public ObservableCollection<SolutionTarget> Solutions { get; } = new ObservableCollection<SolutionTarget>();
+
+        /// <summary>
+        /// Các solution đang tick, hiện thành một khối riêng. Danh sách gốc dài hàng chục dòng nên
+        /// solution đã chọn dễ bị cuộn hoặc bị ô lọc làm khuất - add nhầm môi trường là chuyện lớn.
+        /// </summary>
+        public ObservableCollection<SolutionTarget> ChosenSolutions { get; } = new ObservableCollection<SolutionTarget>();
+
+        public bool HasChosen => ChosenSolutions.Count > 0;
+
+        public string ChosenHeader => $"Đang add vào {ChosenSolutions.Count} solution";
+
         public ObservableCollection<string> TypeNames { get; } = new ObservableCollection<string>();
         public ObservableCollection<string> RecentEnvironments { get; } = new ObservableCollection<string>();
         public ObservableCollection<LogLine> Log { get; } = new ObservableCollection<LogLine>();
@@ -162,6 +174,7 @@ namespace DeployToSolution.ViewModels
         public RelayCommand OpenVerificationCommand { get; }
         public RelayCommand SelectAllSolutionsCommand { get; }
         public RelayCommand SelectNoSolutionsCommand { get; }
+        public RelayCommand UnselectSolutionCommand { get; }
 
         // ---------- connect ----------
 
@@ -311,7 +324,9 @@ namespace DeployToSolution.ViewModels
             IsConnected = false;
             ConnectedAs = "";
             Solutions.Clear();
+            foreach (var s in _allSolutions) s.PropertyChanged -= Solution_PropertyChanged;
             _allSolutions.Clear();
+            RefreshChosen();
             Status = "Đã đăng xuất";
             Info("Đã đăng xuất và xóa phiên đăng nhập đã lưu.");
         }
@@ -329,11 +344,17 @@ namespace DeployToSolution.ViewModels
                         .Concat(_settings.LastTargets ?? new List<string>()),
                     StringComparer.OrdinalIgnoreCase);
 
+                foreach (var s in _allSolutions) s.PropertyChanged -= Solution_PropertyChanged;
+
                 _allSolutions = await _solutions.ListSolutionsAsync(_cts.Token);
                 foreach (var s in _allSolutions)
+                {
                     s.Enabled = previouslySelected.Contains(s.UniqueName);
+                    s.PropertyChanged += Solution_PropertyChanged;
+                }
 
                 ApplySolutionFilter();
+                RefreshChosen();
                 Info($"Đã tải {_allSolutions.Count} solution unmanaged.");
                 Status = "Đã kết nối";
             }
@@ -360,6 +381,20 @@ namespace DeployToSolution.ViewModels
         private void SetAllSolutions(bool enabled)
         {
             foreach (var s in Solutions) s.Enabled = enabled;
+        }
+
+        private void Solution_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(SolutionTarget.Enabled)) RefreshChosen();
+        }
+
+        private void RefreshChosen()
+        {
+            ChosenSolutions.Clear();
+            foreach (var s in _allSolutions.Where(s => s.Enabled)) ChosenSolutions.Add(s);
+
+            Raise(nameof(HasChosen));
+            Raise(nameof(ChosenHeader));
         }
 
         // ---------- component list ----------

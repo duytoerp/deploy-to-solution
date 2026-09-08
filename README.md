@@ -35,7 +35,7 @@ dotnet publish src\DeployToSolution -c Release -r win-x64 --self-contained true 
 | Bước | Làm gì |
 |------|--------|
 | **Kết nối** | Điền URL môi trường (`https://vus-dev.crm5.dynamics.com`) → **Kết nối**. App hiện mã device code, tự copy vào clipboard và mở trình duyệt. Dán mã, đăng nhập xong quay lại app. |
-| **1. Chọn solution đích** | Tick **nhiều** solution unmanaged — ví dụ tick cả `..._UAT_TEST_PATCH_T5_03` và `..._PROD_PATCH_T5_03`. |
+| **1. Chọn solution đích** | Tick **nhiều** solution unmanaged — ví dụ tick cả `..._UAT_TEST_PATCH_T5_03` và `..._PROD_PATCH_T5_03`. Solution đang tick được **ghim thành khối riêng ngay trên danh sách** (`Đang add vào 2 solution`), bấm `✕` để bỏ. Môi trường có hàng chục solution nên cái đã chọn rất dễ bị cuộn hoặc bị ô lọc làm khuất — mà add nhầm môi trường là chuyện lớn. |
 | **2. Danh sách component** | **Nạp CSV** hoặc **Dán từ Excel**. |
 | **3. Chạy** | **Kiểm tra tên** → **Chạy thử** (dry run) → **ADD VÀO SOLUTION**. |
 
