@@ -156,7 +156,8 @@
                                     Command="{Binding ImportCsvCommand}"
                                     ToolTip="Đọc thẳng .xlsx (sheet Components) hoặc .csv" />
                             <Button Content="Dán từ Excel" Style="{StaticResource Flat}" Command="{Binding PasteCommand}" />
-                            <Button Content="Thêm dòng" Style="{StaticResource Flat}" Command="{Binding AddRowCommand}" />
+                            <Button Content="Thêm dòng" Style="{StaticResource Flat}" Command="{Binding AddRowCommand}"
+                                    ToolTip="Mở popup chọn Type rồi tick nhiều tên cùng lúc - mỗi tên thành một dòng." />
                             <Button Content="Xóa dòng" Style="{StaticResource Flat}" Click="RemoveSelected_Click" />
                             <Button Content="Xóa hết" Style="{StaticResource Flat}" Command="{Binding ClearRowsCommand}" />
                             <Border Width="1" Background="{StaticResource Line}" Margin="8,2" />

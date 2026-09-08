@@ -653,13 +653,39 @@ namespace DeployToSolution.ViewModels
         /// <summary>Báo cho view biết dòng vừa thêm, để cuộn tới và chọn sẵn.</summary>
         public event Action<ComponentRow> RowAdded;
 
-        /// <summary>Dòng mới luôn nằm trên đầu để khỏi phải cuộn xuống cuối danh sách.</summary>
+        /// <summary>
+        /// Mở popup thêm dòng: chọn một Type rồi tick nhiều tên cùng lúc, thay vì thêm từng dòng
+        /// trống rồi gõ lại từ đầu.
+        /// </summary>
         private void AddRow()
         {
-            var row = new ComponentRow { Type = "Table" };
-            Rows.Insert(0, row);
-            RowAdded?.Invoke(row);
+            var dialog = new AddRowsWindow(TypeNames, _catalog) { Owner = Application.Current?.MainWindow };
+            dialog.RowsRequested += InsertRows;
+            try { dialog.ShowDialog(); }
+            finally { dialog.RowsRequested -= InsertRows; }
         }
+
+        /// <summary>Cả mẻ mới nằm trên đầu, giữ nguyên thứ tự đã chọn, để khỏi cuộn xuống cuối danh sách.</summary>
+        private void InsertRows(List<ComponentRow> rows)
+        {
+            // Bỏ tên đã có: add trùng một component vào cùng solution không thêm được gì.
+            var seen = new HashSet<string>(Rows.Select(RowKey), StringComparer.OrdinalIgnoreCase);
+            var fresh = rows.Where(r => seen.Add(RowKey(r))).ToList();
+
+            for (var i = 0; i < fresh.Count; i++) Rows.Insert(i, fresh[i]);
+            if (fresh.Count > 0) RowAdded?.Invoke(fresh[0]);
+
+            var skipped = rows.Count - fresh.Count;
+            if (fresh.Count == 0)
+                Warn($"Cả {rows.Count} tên đều đã có trong danh sách, không thêm dòng nào.");
+            else if (skipped > 0)
+                Good($"Đã thêm {fresh.Count} dòng, bỏ qua {skipped} tên đã có trong danh sách.");
+            else
+                Good($"Đã thêm {fresh.Count} dòng.");
+        }
+
+        private static string RowKey(ComponentRow row) =>
+            $"{ComponentCatalog.CanonicalKey(row.Type)}|{(row.Name ?? "").Trim()}";
 
         public void RemoveRows(IEnumerable<ComponentRow> rows)
         {

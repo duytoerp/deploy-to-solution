@@ -114,9 +114,41 @@ và cache lại cho các dòng sau cùng Type.
 | `Relationship` | schema name |
 | còn lại | tên lấy từ chính bảng tương ứng (workflow, plugin step, web resource...) |
 
-Danh sách ưu tiên lọc `ismanaged eq false` (component của bạn, không lẫn hàng ngàn bản ghi hệ thống)
-và giới hạn 2000 dòng. Component managed vẫn gõ tay được như thường — gợi ý chỉ là tiện ích,
-không phải giới hạn.
+Danh sách ưu tiên lọc `ismanaged eq false` (component của bạn, không lẫn hàng ngàn bản ghi hệ thống),
+bỏ bản ghi đã xoá (`componentstate` 2/3 — add không bao giờ được), và giới hạn 2000 dòng. Lọc xong
+mà rỗng thì app tự nới ra lấy cả managed, nên component managed vẫn tìm được.
+
+**Gõ ít nhất 3 ký tự với những loại nhiều bản ghi.** `PluginStep`, `WebResource`, `Workflow`,
+`SecurityRole`... nằm trong bảng dữ liệu có tới hàng chục nghìn dòng, phần lớn là bản ghi nội bộ của
+nền tảng. Lấy 2000 dòng đầu theo alphabet thì `Hs.Vus.*` bị cắt mất sạch. Nên từ ký tự thứ 3 trở đi,
+app đẩy luôn `contains(...)` xuống Dataverse thay vì lọc trên máy — gõ `Hs.` là ra đúng cụm của bạn.
+Ba ký tự đầu quyết định mẻ dữ liệu, gõ tiếp chỉ lọc lại tại chỗ nên không bắn thêm truy vấn.
+`Table`, `Column`, `Choice`, `Form`, `View` không cần: metadata nhỏ, hoặc đã hẹp sẵn theo bảng.
+
+### Thêm nhiều dòng cùng lúc
+
+Nút **Thêm dòng** mở một popup: chọn **một Type**, rồi **tick nhiều tên cùng lúc** — mỗi tên thành
+một dòng riêng. Không phải thêm từng dòng trống rồi gõ lại từ đầu nữa.
+
+- Ô **Lọc** thu hẹp danh sách, ví dụ gõ `Hs.Vus.Warehouse` rồi bấm **Chọn hết đang hiện** để lấy
+  trọn cụm step của một assembly. Với `PluginStep` / `WebResource` / `Workflow` / `SecurityRole`,
+  **phải gõ ít nhất 3 ký tự** thì app mới tìm thẳng trên môi trường — danh sách lúc chưa gõ gì chỉ là
+  2000 tên đầu theo alphabet nên thường toàn bản ghi hệ thống. Dòng chữ xám dưới ô Type nói rõ đang
+  ở trạng thái nào.
+- Với `Column` / `Key` / `View` / `Form` / `Chart`, popup hiện thêm ô **của bảng**: chọn bảng trước,
+  danh sách chỉ còn component của đúng bảng đó và tên được ghép sẵn đúng cú pháp (`bảng.cột`,
+  `bảng|tên`).
+- **IncludeAll** chỉ bật được khi Type là `Table`.
+- Dòng chữ xám nói luôn **đang đọc bảng nào của Dataverse** (`đọc từ sdkmessageprocessingsteps`),
+  để phân biệt ngay `PluginStep` với `PluginType` — tên plugin type và tên step rất giống nhau.
+- Dropdown Type không còn hiện hai mục cho cùng một loại (trước đây có cả `PluginStep` lẫn
+  `SDK Message Processing Step`, cả `PluginType` lẫn `Plugin Type` — rất dễ chọn nhầm).
+- Ô **gõ / dán tên** ở dưới dùng được cả khi chưa kết nối. Mỗi dòng một tên; dòng bắt đầu bằng `#`
+  bị bỏ qua, dấu `- ` đầu dòng được cắt nên **dán thẳng từ Báo cáo deploy** cũng chạy. Đang ở phạm vi
+  một bảng thì tên gõ tay tự được gắn tiền tố bảng.
+- **Thêm & chọn tiếp** đẩy các tên đang chọn vào danh sách rồi ở lại popup, để làm tiếp Type khác.
+- Cả mẻ mới nằm **trên đầu** danh sách, giữ nguyên thứ tự đã chọn. Tên đã có sẵn trong danh sách
+  bị bỏ qua và app báo rõ bỏ bao nhiêu.
 
 ### Form và View trùng tên
 
@@ -158,6 +190,7 @@ Nếu một loại lạ chưa có sẵn, điền **số component type** vào c�
 
 | Nút | Tác dụng |
 |-----|----------|
+| **Thêm dòng** | Mở popup chọn một Type rồi tick nhiều tên cùng lúc — mỗi tên thành một dòng. Xem mục 3. |
 | **Kiểm tra tên** | Chỉ tra ID của từng component. **Không ghi gì** lên môi trường. Dòng sai hiện đỏ kèm gợi ý tên gần giống. |
 | **Chạy thử** | Liệt kê chính xác sẽ add gì vào solution nào. **Không ghi gì.** |
 | **ADD VÀO SOLUTION** | Add thật, có hộp thoại xác nhận liệt kê các solution đích. |

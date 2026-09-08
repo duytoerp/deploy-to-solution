@@ -383,16 +383,32 @@ namespace DeployToSolution.Services
         private void BuildTypeNames()
         {
             TypeNames.Clear();
+            var covered = new HashSet<string>(StringComparer.Ordinal);
+
             // Friendly names first: these are what a hotfix checklist actually says.
             foreach (var friendly in FriendlyTypeNames)
             {
-                if (Aliases.TryGetValue(ComponentTypeDef.Normalize(friendly), out var key) && _byKey.ContainsKey(key))
-                    TypeNames.Add(friendly);
+                if (!Aliases.TryGetValue(ComponentTypeDef.Normalize(friendly), out var key)) continue;
+                if (!_byKey.ContainsKey(key)) continue;
+
+                TypeNames.Add(friendly);
+                covered.Add(key);
             }
 
+            // Nhãn gốc của môi trường chỉ thêm khi chưa có tên quen nào trỏ vào cùng loại đó.
+            // So bằng chuỗi thô thì "PluginStep" và "SDK Message Processing Step" là hai mục khác
+            // nhau, dropdown hoá ra có cả hai cho cùng một thứ - rất dễ chọn nhầm sang PluginType.
             foreach (var t in Types.OrderBy(t => t.Label, StringComparer.OrdinalIgnoreCase))
-                if (!TypeNames.Contains(t.Label, StringComparer.OrdinalIgnoreCase))
-                    TypeNames.Add(t.Label);
+            {
+                if (!covered.Add(t.Key)) continue;
+
+                // Hai componenttype khác nhau vẫn có thể cùng một nhãn (3 "Relationship" và
+                // 10 "Entity Relationship" đều hiện là Relationship). Hai mục chữ giống hệt nhau
+                // thì người dùng không phân biệt nổi - giữ mục đầu, ai cần loại kia gõ thẳng số.
+                if (TypeNames.Contains(t.Label, StringComparer.OrdinalIgnoreCase)) continue;
+
+                TypeNames.Add(t.Label);
+            }
         }
 
         private static string Pretty(string key) =>
@@ -735,7 +751,7 @@ namespace DeployToSolution.Services
         private readonly Dictionary<string, List<string>> _suggestCache =
             new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
-        private const int SuggestLimit = 2000;
+        public const int SuggestLimit = 2000;
 
         /// <summary>
         /// Danh sách tên gợi ý cho cột Name, tuỳ theo Type của dòng. Nạp lười và cache lại,
@@ -772,6 +788,13 @@ namespace DeployToSolution.Services
             ["savedqueryvisualization"] = '|'
         };
 
+        /// <summary>
+        /// Loại chỉ có nghĩa trong phạm vi một bảng (Column, View, Form, Chart, Key) thì trả về
+        /// dấu nối giữa tên bảng và tên component. Tra theo bảng bí danh nên dùng được cả khi chưa kết nối.
+        /// </summary>
+        public static bool TryGetTableScope(string typeInput, out char separator) =>
+            TableScoped.TryGetValue(CanonicalKey(typeInput), out separator);
+
         /// <summary>Bảng mà người dùng đã gõ ở đầu ô Name, nếu loại này thuộc phạm vi một bảng.</summary>
         private static bool TryTableScope(ComponentTypeDef type, string currentName, out string table)
         {
@@ -787,11 +810,69 @@ namespace DeployToSolution.Services
             return table.Length >= 3;
         }
 
-        /// <summary>Gợi ý của Column/View/Form phụ thuộc bảng đã gõ, nên khoá cache phải kèm bảng đó.</summary>
+        /// <summary>
+        /// Số ký tự đầu dùng làm từ khoá tìm trên server. Ngắn thì một mẻ dùng lại được cho nhiều
+        /// phím gõ tiếp theo (lọc nốt ở client), dài thì bắn truy vấn liên tục.
+        /// </summary>
+        private const int SearchPrefix = 3;
+
+        /// <summary>
+        /// Loại đọc từ bảng dữ liệu (step, web resource, workflow, role...) có thể có hàng chục
+        /// nghìn dòng, phần lớn là bản ghi hệ thống. Lấy 2000 dòng đầu theo alphabet là cắt mất
+        /// component của mình, nên chữ đang gõ phải được đẩy xuống server bằng contains().
+        /// </summary>
+        private static bool SearchesOnServer(ComponentTypeDef type) =>
+            type != null && Queries.ContainsKey(type.Key) && !TableScoped.ContainsKey(type.Key);
+
+        /// <summary>Loại mà ô Lọc / ô Name phải gõ đủ vài ký tự thì mới tìm ra, vì phải lọc trên server.</summary>
+        public bool SearchesOnServer(string typeInput) => SearchesOnServer(MatchType(typeInput));
+
+        /// <summary>Số ký tự tối thiểu để bắt đầu tìm trên server.</summary>
+        public static int SearchMinLength => SearchPrefix;
+
+        /// <summary>
+        /// Bảng Dataverse mà gợi ý của loại này đọc ra. Hiện thẳng lên giao diện để nhìn là biết
+        /// đang xem step hay plugin type, khỏi phải đoán qua tên component.
+        /// </summary>
+        public string SourceTable(string typeInput)
+        {
+            var type = MatchType(typeInput);
+            if (type == null) return null;
+            if (Queries.TryGetValue(type.Key, out var q)) return q.EntitySet;
+
+            return type.Key switch
+            {
+                "entity" => "EntityDefinitions",
+                "attribute" => "EntityDefinitions/Attributes",
+                "entitykey" => "EntityDefinitions/Keys",
+                "optionset" => "GlobalOptionSetDefinitions",
+                "entityrelationship" or "relationship" => "RelationshipDefinitions",
+                _ => null
+            };
+        }
+
+        private static string SearchSeed(string currentName)
+        {
+            var text = (currentName ?? "").Trim();
+            return text.Length >= SearchPrefix ? text.Substring(0, SearchPrefix) : "";
+        }
+
+        /// <summary>
+        /// Khoá của một mẻ gợi ý. Column/View/Form phụ thuộc bảng đã gõ; loại tìm trên server
+        /// còn phụ thuộc mấy chữ đầu người dùng gõ.
+        /// </summary>
         public string SuggestionKey(ComponentTypeDef type, string currentName)
         {
             if (type == null) return "";
-            return TryTableScope(type, currentName, out var table) ? $"{type.Key}:{table}" : type.Key;
+            if (TryTableScope(type, currentName, out var table)) return $"{type.Key}:{table}";
+
+            if (SearchesOnServer(type))
+            {
+                var seed = SearchSeed(currentName);
+                if (seed.Length > 0) return $"{type.Key}~{seed.ToLowerInvariant()}";
+            }
+
+            return type.Key;
         }
 
         public string SuggestionKey(string typeInput, string currentName) =>
@@ -830,7 +911,7 @@ namespace DeployToSolution.Services
                         return (await EnsureEntitiesAsync(ct).ConfigureAwait(false))
                             .Select(e => Str(e, "LogicalName") + "|").ToList();
 
-                    return await QuerySuggestionsAsync(type, owner, ct).ConfigureAwait(false);
+                    return await QuerySuggestionsAsync(type, owner, null, ct).ConfigureAwait(false);
                 }
 
                 case "optionset":
@@ -844,11 +925,12 @@ namespace DeployToSolution.Services
                     return _relationshipCache.Select(r => Str(r, "SchemaName")).ToList();
 
                 default:
-                    return await QuerySuggestionsAsync(type, null, ct).ConfigureAwait(false);
+                    return await QuerySuggestionsAsync(type, null, SearchSeed(currentName), ct).ConfigureAwait(false);
             }
         }
 
-        private async Task<List<string>> QuerySuggestionsAsync(ComponentTypeDef type, string ownerTable, CancellationToken ct)
+        private async Task<List<string>> QuerySuggestionsAsync(ComponentTypeDef type, string ownerTable,
+            string search, CancellationToken ct)
         {
             if (!Queries.TryGetValue(type.Key, out var q)) return new List<string>();
 
@@ -856,40 +938,68 @@ namespace DeployToSolution.Services
             var fields = new List<string> { nameField };
             if (q.ParentField != null) fields.Add(q.ParentField);
             if (q.VariantField != null) fields.Add(q.VariantField);
-            var select = string.Join(",", fields);
+
+            var plain = string.Join(",", fields.Distinct());
+            // componentstate để loại bản ghi đã xoá, đúng như lúc resolve.
+            var withState = string.Join(",", fields.Concat(new[] { "componentstate" }).Distinct());
 
             var baseFilters = new List<string>();
             if (!string.IsNullOrEmpty(q.FixedFilter)) baseFilters.Add(q.FixedFilter);
             if (!string.IsNullOrEmpty(ownerTable) && q.ParentField != null)
                 baseFilters.Add($"{q.ParentField} eq '{DataverseClient.Esc(ownerTable)}'");
 
+            // Tìm ngay trên server: bảng như sdkmessageprocessingstep có hàng chục nghìn dòng,
+            // cắt 2000 dòng đầu theo alphabet là mất sạch component của mình.
+            if (!string.IsNullOrEmpty(search))
+                baseFilters.Add($"contains({nameField},'{DataverseClient.Esc(search)}')");
+
             // Hotfix hầu như chỉ đụng component unmanaged; lọc bớt hàng ngàn bản ghi hệ thống.
-            var withManaged = new List<string>(baseFilters) { "ismanaged eq false" };
+            var unmanagedOnly = new List<string>(baseFilters) { "ismanaged eq false" };
 
-            foreach (var filters in new[] { withManaged, baseFilters })
+            // Nới dần: hết unmanaged thì lấy cả managed, môi trường không có componentstate thì bỏ cột đó.
+            var attempts = new[]
             {
-                var url = $"{q.EntitySet}?$select={select}&$orderby={nameField}&$top={SuggestLimit}";
-                if (filters.Count > 0) url += $"&$filter={F(string.Join(" and ", filters))}";
+                (Select: withState, Filters: unmanagedOnly),
+                (Select: withState, Filters: baseFilters),
+                (Select: plain,     Filters: unmanagedOnly),
+                (Select: plain,     Filters: baseFilters)
+            };
 
+            foreach (var attempt in attempts)
+            {
+                var url = $"{q.EntitySet}?$select={attempt.Select}&$orderby={nameField}&$top={SuggestLimit}";
+                if (attempt.Filters.Count > 0) url += $"&$filter={F(string.Join(" and ", attempt.Filters))}";
+
+                List<JsonElement> rows;
                 try
                 {
-                    var rows = await _client.GetAllAsync(url, ct).ConfigureAwait(false);
-                    return rows.Select(r =>
-                    {
-                        var name = Str(r, nameField);
-                        if (q.ParentField == null) return name;
-
-                        var parent = Str(r, q.ParentField);
-                        if (string.IsNullOrEmpty(parent)) return name;
-
-                        // Kèm luôn biến thể: form/view hay trùng tên trong cùng một bảng.
-                        var variant = VariantLabel(r, q);
-                        return string.IsNullOrEmpty(variant)
-                            ? $"{parent}|{name}"
-                            : $"{parent}|{name}|{variant}";
-                    }).ToList();
+                    rows = await _client.GetAllAsync(url, ct).ConfigureAwait(false);
                 }
-                catch (DataverseException) { /* thử lại không lọc ismanaged */ }
+                catch (DataverseException)
+                {
+                    continue;   // cột không tồn tại trên môi trường này - thử cách nới hơn
+                }
+
+                // Bản ghi đã xoá vẫn nằm trong bảng nhưng không bao giờ add được, đừng gợi ý.
+                var live = rows.Where(r => !IsDeletedComponent(r)).ToList();
+
+                // Lọc xong không còn gì thì chưa chắc là "không có", mà có thể do bộ lọc quá chặt.
+                if (live.Count == 0) continue;
+
+                return live.Select(r =>
+                {
+                    var name = Str(r, nameField);
+                    if (q.ParentField == null) return name;
+
+                    var parent = Str(r, q.ParentField);
+                    if (string.IsNullOrEmpty(parent)) return name;
+
+                    // Kèm luôn biến thể: form/view hay trùng tên trong cùng một bảng.
+                    var variant = VariantLabel(r, q);
+                    return string.IsNullOrEmpty(variant)
+                        ? $"{parent}|{name}"
+                        : $"{parent}|{name}|{variant}";
+                }).ToList();
             }
 
             return new List<string>();
