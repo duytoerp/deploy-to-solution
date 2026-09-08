@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -61,7 +63,25 @@ namespace DeployToSolution.ViewModels
             SelectNoSolutionsCommand = new RelayCommand(_ => SetAllSolutions(false));
             UnselectSolutionCommand = new RelayCommand(p => { if (p is SolutionTarget s) s.Enabled = false; });
 
+            NewProjectCommand = new RelayCommand(_ => NewProject(), _ => !IsBusy);
+            SaveProjectCommand = new RelayCommand(_ => SaveProject(), _ => !IsBusy && Rows.Count > 0);
+            SaveProjectAsCommand = new RelayCommand(_ => SaveProjectAs(), _ => !IsBusy && Rows.Count > 0);
+            RenameProjectCommand = new RelayCommand(_ => RenameProject(), _ => !IsBusy && CurrentProject != null);
+            DeleteProjectCommand = new RelayCommand(_ => DeleteProject(), _ => !IsBusy && CurrentProject != null);
+            OpenProjectFolderCommand = new RelayCommand(_ => OpenFolder(ProjectStore.Dir));
+
+            // Mọi thay đổi trong danh sách component đều làm dự án "bẩn" -> hiện dấu * để khỏi mất công.
+            Rows.CollectionChanged += Rows_CollectionChanged;
+
+            LoadProjects();
             Info("Sẵn sàng. Nhập URL môi trường rồi bấm Kết nối.");
+
+            var last = _settings.LastProject;
+            if (!string.IsNullOrWhiteSpace(last))
+            {
+                var project = Projects.FirstOrDefault(p => string.Equals(p.Name, last, StringComparison.OrdinalIgnoreCase));
+                if (project != null) OpenProject(project);
+            }
         }
 
         // ---------- state ----------
@@ -102,10 +122,10 @@ namespace DeployToSolution.ViewModels
         public bool RememberSignIn { get => _rememberSignIn; set => Set(ref _rememberSignIn, value); }
 
         private bool _addRequiredComponents;
-        public bool AddRequiredComponents { get => _addRequiredComponents; set => Set(ref _addRequiredComponents, value); }
+        public bool AddRequiredComponents { get => _addRequiredComponents; set { if (Set(ref _addRequiredComponents, value)) MarkProjectDirty(); } }
 
         private bool _cleanupArchival = true;
-        public bool CleanupArchival { get => _cleanupArchival; set => Set(ref _cleanupArchival, value); }
+        public bool CleanupArchival { get => _cleanupArchival; set { if (Set(ref _cleanupArchival, value)) MarkProjectDirty(); } }
 
         private bool _isConnected;
         public bool IsConnected { get => _isConnected; set => Set(ref _isConnected, value); }
@@ -175,6 +195,12 @@ namespace DeployToSolution.ViewModels
         public RelayCommand SelectAllSolutionsCommand { get; }
         public RelayCommand SelectNoSolutionsCommand { get; }
         public RelayCommand UnselectSolutionCommand { get; }
+        public RelayCommand NewProjectCommand { get; }
+        public RelayCommand SaveProjectCommand { get; }
+        public RelayCommand SaveProjectAsCommand { get; }
+        public RelayCommand RenameProjectCommand { get; }
+        public RelayCommand DeleteProjectCommand { get; }
+        public RelayCommand OpenProjectFolderCommand { get; }
 
         // ---------- connect ----------
 
@@ -339,22 +365,41 @@ namespace DeployToSolution.ViewModels
                 Status = "Đang tải danh sách solution...";
                 if (_cts == null || _cts.IsCancellationRequested) _cts = new CancellationTokenSource();
 
-                var previouslySelected = new HashSet<string>(
-                    _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName)
-                        .Concat(_settings.LastTargets ?? new List<string>()),
-                    StringComparer.OrdinalIgnoreCase);
+                // Dự án đang mở quyết định solution đích; chưa có dự án thì dùng lần tick gần nhất.
+                var wanted = CurrentProject != null
+                    ? CurrentProject.Solutions
+                    : _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName)
+                        .Concat(_settings.LastTargets ?? new List<string>()).ToList();
+                var previouslySelected = new HashSet<string>(wanted, StringComparer.OrdinalIgnoreCase);
 
                 foreach (var s in _allSolutions) s.PropertyChanged -= Solution_PropertyChanged;
 
                 _allSolutions = await _solutions.ListSolutionsAsync(_cts.Token);
-                foreach (var s in _allSolutions)
+
+                // Tick lại theo dự án không phải là người dùng sửa dự án.
+                _loadingProject = true;
+                try
                 {
-                    s.Enabled = previouslySelected.Contains(s.UniqueName);
-                    s.PropertyChanged += Solution_PropertyChanged;
+                    foreach (var s in _allSolutions)
+                    {
+                        s.Enabled = previouslySelected.Contains(s.UniqueName);
+                        s.PropertyChanged += Solution_PropertyChanged;
+                    }
                 }
+                finally { _loadingProject = false; }
 
                 ApplySolutionFilter();
                 RefreshChosen();
+
+                if (CurrentProject != null)
+                {
+                    var missing = CurrentProject.Solutions
+                        .Where(n => !_allSolutions.Any(s => string.Equals(s.UniqueName, n, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (missing.Count > 0)
+                        Warn($"Dự án \"{CurrentProject.Name}\" có {missing.Count} solution không còn trong " +
+                             "môi trường: " + string.Join(", ", missing));
+                }
                 Info($"Đã tải {_allSolutions.Count} solution unmanaged.");
                 Status = "Đã kết nối";
             }
@@ -385,7 +430,9 @@ namespace DeployToSolution.ViewModels
 
         private void Solution_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(SolutionTarget.Enabled)) RefreshChosen();
+            if (e.PropertyName != nameof(SolutionTarget.Enabled)) return;
+            RefreshChosen();
+            MarkProjectDirty();
         }
 
         private void RefreshChosen()
@@ -632,16 +679,7 @@ namespace DeployToSolution.ViewModels
             catch (Exception ex) { Error(ex.Message); }
         }
 
-        private void OpenLogFolder()
-        {
-            try
-            {
-                var folder = Path.GetDirectoryName(SettingsStore.LogFile);
-                Directory.CreateDirectory(folder);
-                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
-            }
-            catch (Exception ex) { Error(ex.Message); }
-        }
+        private void OpenLogFolder() => OpenFolder(Path.GetDirectoryName(SettingsStore.LogFile));
 
         /// <summary>
         /// Nạp và lọc gợi ý cho cột Name theo Type của dòng, gọi lại mỗi lần người dùng gõ.
@@ -736,6 +774,309 @@ namespace DeployToSolution.ViewModels
                 if (at < 0) continue;
                 Rows.Insert(at + 1, r.Clone());
             }
+        }
+
+        // ---------- dự án deploy ----------
+
+        /// <summary>
+        /// Mỗi hotfix là một dự án: danh sách component riêng cộng các solution đích riêng.
+        /// Tự lưu khi đổi dự án, khi deploy xong và khi đóng app — không có hộp thoại "lưu chưa?"
+        /// để không bao giờ mất công dựng lại danh sách.
+        /// </summary>
+        public ObservableCollection<DeployProject> Projects { get; } = new ObservableCollection<DeployProject>();
+
+        private DeployProject _currentProject;
+        public DeployProject CurrentProject
+        {
+            get => _currentProject;
+            set
+            {
+                if (_switchingProject || ReferenceEquals(_currentProject, value)) return;
+
+                SaveCurrentProject(quiet: true);   // giữ lại việc đang làm dở trước khi đi chỗ khác
+
+                _currentProject = value;
+                Raise(nameof(CurrentProject));
+
+                if (value != null) ApplyProject(value);
+                Raise(nameof(ProjectTitle));
+            }
+        }
+
+        private bool _switchingProject;   // chính code này đang đổi -> đừng coi là người dùng chọn
+        private bool _loadingProject;     // đang đổ dữ liệu vào -> đừng đánh dấu là đã sửa
+
+        private bool _isProjectDirty;
+        public bool IsProjectDirty
+        {
+            get => _isProjectDirty;
+            set { if (Set(ref _isProjectDirty, value)) Raise(nameof(ProjectTitle)); }
+        }
+
+        public string ProjectTitle => CurrentProject == null
+            ? "(chưa chọn dự án)"
+            : CurrentProject.Name + (IsProjectDirty ? "  •  chưa lưu" : "");
+
+        private void LoadProjects()
+        {
+            Projects.Clear();
+            foreach (var project in ProjectStore.LoadAll()) Projects.Add(project);
+        }
+
+        private void SetCurrentQuietly(DeployProject project)
+        {
+            _switchingProject = true;
+            try
+            {
+                _currentProject = project;
+                Raise(nameof(CurrentProject));
+                Raise(nameof(ProjectTitle));
+            }
+            finally { _switchingProject = false; }
+        }
+
+        private void OpenProject(DeployProject project)
+        {
+            SetCurrentQuietly(project);
+            ApplyProject(project);
+        }
+
+        private void ApplyProject(DeployProject project)
+        {
+            _loadingProject = true;
+            try
+            {
+                Rows.Clear();
+                foreach (var row in project.Rows)
+                    Rows.Add(new ComponentRow
+                    {
+                        Include = row.Include, Type = row.Type, Name = row.Name, IncludeAll = row.IncludeAll
+                    });
+
+                AddRequiredComponents = project.AddRequiredComponents;
+                CleanupArchival = project.CleanupArchival;
+
+                // Chỉ điền URL khi ô đang trống: đang kết nối rồi thì đừng giật môi trường khỏi tay người dùng.
+                if (!string.IsNullOrWhiteSpace(project.EnvironmentUrl) && string.IsNullOrWhiteSpace(EnvironmentUrl))
+                    EnvironmentUrl = project.EnvironmentUrl;
+
+                ApplyProjectSolutions(project);
+            }
+            finally { _loadingProject = false; }
+
+            IsProjectDirty = false;
+            _settings.LastProject = project.Name;
+            SaveSettings();
+
+            Good($"Dự án \"{project.Name}\": {project.Rows.Count} component, {project.Solutions.Count} solution đích.");
+        }
+
+        /// <summary>Tick lại đúng solution của dự án. Chưa tải danh sách thì để lúc kết nối xong làm.</summary>
+        private void ApplyProjectSolutions(DeployProject project)
+        {
+            if (_allSolutions.Count == 0) return;
+
+            var wanted = new HashSet<string>(project.Solutions, StringComparer.OrdinalIgnoreCase);
+            foreach (var s in _allSolutions) s.Enabled = wanted.Contains(s.UniqueName);
+            RefreshChosen();
+
+            var missing = project.Solutions
+                .Where(n => !_allSolutions.Any(s => string.Equals(s.UniqueName, n, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (missing.Count > 0)
+                Warn($"Dự án \"{project.Name}\" có {missing.Count} solution không còn trong môi trường: " +
+                     string.Join(", ", missing));
+        }
+
+        private void CaptureInto(DeployProject project)
+        {
+            project.EnvironmentUrl = EnvironmentUrl;
+            project.Solutions = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList();
+            project.AddRequiredComponents = AddRequiredComponents;
+            project.CleanupArchival = CleanupArchival;
+            project.Rows = Rows.Select(r => new ProjectRow
+            {
+                Include = r.Include, Type = r.Type, Name = r.Name, IncludeAll = r.IncludeAll
+            }).ToList();
+        }
+
+        public void SaveCurrentProject(bool quiet = false)
+        {
+            if (CurrentProject == null) return;
+
+            try
+            {
+                CaptureInto(CurrentProject);
+                ProjectStore.Save(CurrentProject);
+                IsProjectDirty = false;
+                if (!quiet) Good($"Đã lưu dự án \"{CurrentProject.Name}\".");
+            }
+            catch (Exception ex)
+            {
+                Error("Không lưu được dự án: " + ex.Message);
+            }
+        }
+
+        private void SaveProject() => SaveCurrentProject();
+
+        private void NewProject()
+        {
+            var name = AskProjectName("Dự án mới", $"Deploy {DateTime.Now:dd-MM-yyyy}");
+            if (name == null) return;
+
+            SaveCurrentProject(quiet: true);
+
+            var project = new DeployProject
+            {
+                Name = name,
+                EnvironmentUrl = EnvironmentUrl,
+                AddRequiredComponents = AddRequiredComponents,
+                CleanupArchival = CleanupArchival,
+                Solutions = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList()
+            };
+
+            try { ProjectStore.Save(project); }
+            catch (Exception ex) { Error("Không tạo được dự án: " + ex.Message); return; }
+
+            Projects.Insert(0, project);
+            SetCurrentQuietly(project);
+
+            _loadingProject = true;
+            try { Rows.Clear(); }          // dự án mới bắt đầu từ danh sách trống
+            finally { _loadingProject = false; }
+
+            IsProjectDirty = false;
+            _settings.LastProject = name;
+            SaveSettings();
+            Good($"Đã tạo dự án \"{name}\". Solution đang tick được giữ nguyên, danh sách component để trống.");
+        }
+
+        /// <summary>Nhân bản danh sách đang có sang một dự án mới - tiện khi hotfix sau giống hotfix trước.</summary>
+        private void SaveProjectAs()
+        {
+            var suggestion = CurrentProject == null ? $"Deploy {DateTime.Now:dd-MM-yyyy}" : CurrentProject.Name + " (copy)";
+            var name = AskProjectName("Lưu thành dự án mới", suggestion);
+            if (name == null) return;
+
+            var project = new DeployProject { Name = name, Note = CurrentProject?.Note ?? "" };
+            CaptureInto(project);
+
+            try { ProjectStore.Save(project); }
+            catch (Exception ex) { Error("Không lưu được dự án: " + ex.Message); return; }
+
+            Projects.Insert(0, project);
+            SetCurrentQuietly(project);
+            IsProjectDirty = false;
+            _settings.LastProject = name;
+            SaveSettings();
+            Good($"Đã lưu thành dự án \"{name}\" với {Rows.Count} component.");
+        }
+
+        private void RenameProject()
+        {
+            var project = CurrentProject;
+            if (project == null) return;
+
+            var name = AskProjectName("Đổi tên dự án", project.Name, project.Name);
+            if (name == null || name == project.Name) return;
+
+            var oldName = project.Name;
+            try
+            {
+                project.Name = name;
+                ProjectStore.Save(project);
+                ProjectStore.Delete(oldName);
+            }
+            catch (Exception ex)
+            {
+                project.Name = oldName;
+                Error("Không đổi tên được: " + ex.Message);
+                return;
+            }
+
+            // ComboBox hiện Name, mà Name không phải thuộc tính quan sát được -> dựng lại mục đó.
+            var at = Projects.IndexOf(project);
+            if (at >= 0) { Projects.RemoveAt(at); Projects.Insert(at, project); }
+            SetCurrentQuietly(project);
+
+            _settings.LastProject = name;
+            SaveSettings();
+            Good($"Đã đổi tên dự án \"{oldName}\" thành \"{name}\".");
+        }
+
+        private void DeleteProject()
+        {
+            var project = CurrentProject;
+            if (project == null) return;
+
+            var answer = MessageBox.Show(
+                $"Xóa dự án \"{project.Name}\"?\n\n" +
+                $"{project.Rows.Count} component sẽ mất khỏi ổ đĩa. Danh sách đang hiện trên màn hình vẫn còn.",
+                "Xóa dự án", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.OK) return;
+
+            ProjectStore.Delete(project.Name);
+            Projects.Remove(project);
+            SetCurrentQuietly(null);
+
+            IsProjectDirty = false;
+            _settings.LastProject = "";
+            SaveSettings();
+            Warn($"Đã xóa dự án \"{project.Name}\".");
+        }
+
+        private string AskProjectName(string title, string suggestion, string allowSame = null)
+        {
+            return PromptWindow.Ask(Application.Current?.MainWindow, title,
+                "Tên dự án — thường là mã ticket hoặc tên hotfix:",
+                suggestion,
+                $"Mỗi dự án là một file .json trong {ProjectStore.Dir}",
+                name =>
+                {
+                    if (string.IsNullOrWhiteSpace(name)) return "Tên dự án không được để trống.";
+                    if (!string.Equals(name, allowSame, StringComparison.OrdinalIgnoreCase) &&
+                        Projects.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        return $"Đã có dự án tên \"{name}\".";
+                    return null;
+                });
+        }
+
+        private void Rows_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+                foreach (ComponentRow row in e.OldItems) row.PropertyChanged -= Row_PropertyChanged;
+            if (e.NewItems != null)
+                foreach (ComponentRow row in e.NewItems) row.PropertyChanged += Row_PropertyChanged;
+
+            MarkProjectDirty();
+        }
+
+        /// <summary>ObjectId / trạng thái / thông báo đổi liên tục lúc chạy, không phải nội dung dự án.</summary>
+        private static readonly HashSet<string> ProjectFields = new HashSet<string>(StringComparer.Ordinal)
+        {
+            nameof(ComponentRow.Include), nameof(ComponentRow.Type),
+            nameof(ComponentRow.Name), nameof(ComponentRow.IncludeAll)
+        };
+
+        private void Row_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (ProjectFields.Contains(e.PropertyName)) MarkProjectDirty();
+        }
+
+        private void MarkProjectDirty()
+        {
+            if (_loadingProject) return;
+            IsProjectDirty = true;
+        }
+
+        private void OpenFolder(string folder)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+            }
+            catch (Exception ex) { Error(ex.Message); }
         }
 
         // ---------- resolve + run ----------
@@ -935,6 +1276,15 @@ namespace DeployToSolution.ViewModels
             var verb = dryRun ? "sẽ add" : "đã add";
             var summary = $"XONG - {verb}: {added}, đã có sẵn: {already}, lỗi: {failed}.";
             if (failed > 0) Error(summary); else Good(summary);
+
+            // Ghi lại lần deploy thật vào dự án: mở lại là biết đợt này đã chạy chưa, chạy ra sao.
+            if (!dryRun && CurrentProject != null)
+            {
+                CurrentProject.LastDeployedUtc = DateTime.UtcNow;
+                CurrentProject.LastResult =
+                    $"add {added}, có sẵn {already}, lỗi {failed} · {selectedSolutions.Count} solution";
+                SaveCurrentProject(quiet: true);
+            }
         }
 
         /// <summary>

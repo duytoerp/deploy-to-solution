@@ -14,6 +14,9 @@ namespace DeployToSolution.Models
         public bool CleanupArchival { get; set; } = true;
         public string LastCsvPath { get; set; } = "";
         public List<string> LastTargets { get; set; } = new List<string>();
+
+        /// <summary>Dự án deploy mở lần trước, để lần sau mở app là vào đúng chỗ đang làm dở.</summary>
+        public string LastProject { get; set; } = "";
     }
 
     public static class AuthDefaults

@@ -41,6 +41,31 @@ dotnet publish src\DeployToSolution -c Release -r win-x64 --self-contained true 
 
 Lần sau mở app: phiên đăng nhập, danh sách môi trường và các solution đã tick được nhớ sẵn.
 
+### Dự án deploy — mỗi hotfix một danh sách
+
+Thanh **Dự án** ngay trên lưới component. Mỗi đợt deploy là một dự án, giữ riêng:
+danh sách component, các solution đích, hai tùy chọn khi chạy, và lần deploy thật gần nhất.
+Tuần sau mở lại dự án là có nguyên danh sách cũ, không phải dựng lại từ Excel.
+
+| Nút | Tác dụng |
+|-----|----------|
+| **(dropdown)** | Chọn để mở lại một dự án. Mỗi mục hiện kèm `12 component · 2 solution · deploy 05/09/2026 14:30`. |
+| **Dự án mới** | Đặt tên rồi tạo: danh sách component để **trống**, các solution đang tick **giữ nguyên** (hotfix sau thường vẫn đi UAT + PROD như cũ). |
+| **Lưu** | Ghi ngay. Bình thường không cần bấm — xem mục tự lưu bên dưới. |
+| **Lưu thành...** | Nhân bản danh sách đang có sang dự án mới. Tiện khi đợt này gần giống đợt trước. |
+| **Đổi tên** / **Xóa dự án** | Đổi tên đồng thời đổi luôn tên file. Xóa có hỏi lại; danh sách đang hiện trên màn hình vẫn còn. |
+| **Mở thư mục** | Mở `%APPDATA%\DeployToSolution\projects`. |
+
+**Tự lưu, không có hộp thoại "lưu chưa?".** App ghi xuống đĩa khi bạn đổi sang dự án khác,
+khi deploy thật xong, và khi đóng app. Chữ tím bên phải thanh Dự án hiện tên dự án đang mở,
+kèm `• chưa lưu` khi có thay đổi chưa ghi.
+
+Mỗi dự án là **một file `.json` đọc được bằng mắt** trong `%APPDATA%\DeployToSolution\projects`.
+Copy file sang máy khác hoặc gửi cho đồng nghiệp là xong, không cần export gì thêm.
+
+Mở một dự án sẽ **tick lại đúng các solution** của nó. Solution nào không còn trong môi trường thì
+app báo rõ tên, không im lặng bỏ qua.
+
 ---
 
 ## 3. Định dạng danh sách component

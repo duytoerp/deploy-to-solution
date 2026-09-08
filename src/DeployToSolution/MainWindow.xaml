@@ -181,6 +181,50 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Mỗi hotfix là một dự án: danh sách component riêng + solution đích riêng.
+                         Tự lưu khi đổi dự án, khi deploy xong và khi đóng app. -->
+                    <Border DockPanel.Dock="Top" Background="#FAF9F8" Padding="8,6"
+                            BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Dự án" FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Margin="0,0,8,0" />
+                            <ComboBox x:Name="ProjectCombo" Width="260" MaxDropDownHeight="420"
+                                      ItemsSource="{Binding Projects}"
+                                      SelectedItem="{Binding CurrentProject, Mode=TwoWay}"
+                                      PreviewMouseWheel="Combo_PreviewMouseWheel"
+                                      ToolTip="Chọn một dự án để mở lại danh sách component của đợt deploy đó.">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Summary}" Foreground="#605E5C" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <Button Content="Dự án mới" Style="{StaticResource Flat}" MinWidth="90"
+                                    Command="{Binding NewProjectCommand}"
+                                    ToolTip="Tạo đợt deploy mới: danh sách component để trống, giữ nguyên solution đang tick." />
+                            <Button Content="Lưu" Style="{StaticResource Flat}" MinWidth="60"
+                                    Command="{Binding SaveProjectCommand}" />
+                            <Button Content="Lưu thành..." Style="{StaticResource Flat}" MinWidth="90"
+                                    Command="{Binding SaveProjectAsCommand}"
+                                    ToolTip="Nhân bản danh sách đang có sang một dự án mới." />
+                            <Button Content="Đổi tên" Style="{StaticResource Flat}" MinWidth="70"
+                                    Command="{Binding RenameProjectCommand}" />
+                            <Button Content="Xóa dự án" Style="{StaticResource Flat}" MinWidth="80"
+                                    Command="{Binding DeleteProjectCommand}" />
+                            <Button Content="Mở thư mục" Style="{StaticResource Flat}" MinWidth="90"
+                                    Command="{Binding OpenProjectFolderCommand}"
+                                    ToolTip="Mỗi dự án là một file .json - copy sang máy khác hay gửi đồng nghiệp là xong." />
+
+                            <TextBlock Text="{Binding ProjectTitle}" VerticalAlignment="Center" Margin="10,0,0,0"
+                                       Foreground="{StaticResource Brand}" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" MaxWidth="300" />
+                        </StackPanel>
+                    </Border>
+
                     <Border DockPanel.Dock="Top" Padding="8,6" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Tải template" Style="{StaticResource Flat}" MinWidth="100"

@@ -39,7 +39,12 @@ namespace DeployToSolution
                 RowsGrid.CurrentCell = new DataGridCellInfo(row, RowsGrid.Columns[1]);
             };
 
-            Closing += (s, e) => _vm.SaveSettings();
+            Closing += (s, e) =>
+            {
+                // Tự lưu dự án khi đóng: không bao giờ để mất danh sách vừa dựng vì quên bấm Lưu.
+                _vm.SaveCurrentProject(quiet: true);
+                _vm.SaveSettings();
+            };
         }
 
         private void RowsGrid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
@@ -67,6 +72,15 @@ namespace DeployToSolution
 
         private void SecretBox_PasswordChanged(object sender, RoutedEventArgs e)
             => _vm.ClientSecret = ((PasswordBox)sender).Password;
+
+        /// <summary>
+        /// ComboBox WPF đang đóng mà lăn chuột là âm thầm nhảy sang mục kế bên - với ô Dự án thì
+        /// đó là mở nhầm cả một danh sách component khác.
+        /// </summary>
+        private void Combo_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (sender is ComboBox combo && !combo.IsDropDownOpen) e.Handled = true;
+        }
 
         /// <summary>Chuột phải vào một dòng chưa được chọn thì chọn dòng đó, để menu tác động đúng chỗ.</summary>
         private void Row_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
