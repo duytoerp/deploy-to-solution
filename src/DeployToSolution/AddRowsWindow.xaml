@@ -19,13 +19,17 @@
             <StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Type" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox x:Name="TypeCombo" Width="210" IsEditable="True"
-                              TextBoxBase.TextChanged="Scope_TextChanged" />
+                    <!-- Không cho gõ: ô Type gõ được thì WPF tự hoàn thành chữ và nhảy lung tung
+                         giữa PluginAssembly / PluginType / PluginStep. Bấm chọn, hoặc gõ để nhảy tới. -->
+                    <ComboBox x:Name="TypeCombo" Width="210" MaxDropDownHeight="420"
+                              SelectionChanged="Type_SelectionChanged"
+                              PreviewMouseWheel="Combo_PreviewMouseWheel" />
 
                     <TextBlock x:Name="TableLabel" Text="của bảng" VerticalAlignment="Center" Margin="18,0,8,0" />
                     <ComboBox x:Name="TableCombo" Width="280" IsEditable="True" IsTextSearchEnabled="False"
                               StaysOpenOnEdit="True" MaxDropDownHeight="320"
-                              TextBoxBase.TextChanged="Scope_TextChanged" />
+                              TextBoxBase.TextChanged="Scope_TextChanged"
+                              PreviewMouseWheel="Combo_PreviewMouseWheel" />
 
                     <CheckBox x:Name="IncludeAllBox" Content="IncludeAll" VerticalAlignment="Center" Margin="18,0,0,0"
                               ToolTip="Chỉ có nghĩa với Table: add kèm toàn bộ column / form / view / relationship của bảng." />

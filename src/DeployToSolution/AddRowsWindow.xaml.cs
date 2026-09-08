@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using DeployToSolution.Models;
 using DeployToSolution.Services;
 
@@ -29,6 +31,9 @@ namespace DeployToSolution
     /// </summary>
     public partial class AddRowsWindow : Window
     {
+        /// <summary>Màu chữ gợi ý lúc bình thường, khớp với màu đặt trong XAML.</summary>
+        private static readonly Brush CalmHint = new SolidColorBrush(Color.FromRgb(0x60, 0x5E, 0x5C));
+
         private readonly ComponentCatalog _catalog;               // null khi chưa kết nối
         private readonly List<PickName> _all = new List<PickName>();
         private readonly ObservableCollection<PickName> _shown = new ObservableCollection<PickName>();
@@ -56,11 +61,21 @@ namespace DeployToSolution
             NameList.ItemsSource = _shown;
 
             _ready = true;
-            TypeCombo.Text = types.Contains("Table", StringComparer.OrdinalIgnoreCase) ? "Table" : types[0];
+            TypeCombo.SelectedItem =
+                types.FirstOrDefault(t => string.Equals(t, "Table", StringComparison.OrdinalIgnoreCase)) ?? types[0];
             UpdateCount();
         }
 
+        /// <summary>Loại đang chọn. Đọc từ SelectedItem chứ không phải Text: ô Type không cho gõ.</summary>
+        private string SelectedType => TypeCombo.SelectedItem as string ?? "";
+
         // ---------- nạp gợi ý theo Type (và bảng) ----------
+
+        private async void Type_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_ready || _suspend) return;
+            await RefreshAsync();
+        }
 
         private async void Scope_TextChanged(object sender, TextChangedEventArgs e)
         {
@@ -68,9 +83,18 @@ namespace DeployToSolution
             await RefreshAsync();
         }
 
+        /// <summary>
+        /// ComboBox WPF đang đóng mà lăn chuột là âm thầm nhảy sang mục kế bên. Chọn PluginStep
+        /// xong lăn chuột một nấc là thành PluginType mà không hề hay biết.
+        /// </summary>
+        private void Combo_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (sender is ComboBox combo && !combo.IsDropDownOpen) e.Handled = true;
+        }
+
         private async Task RefreshAsync()
         {
-            var type = (TypeCombo.Text ?? "").Trim();
+            var type = SelectedType.Trim();
             var scoped = ComponentCatalog.TryGetTableScope(type, out var separator);
             var table = (TableCombo.Text ?? "").Trim();
 
@@ -148,6 +172,13 @@ namespace DeployToSolution
         }
 
         /// <summary>
+        /// PluginType chứa tên CLASS plugin, mà class thường được đặt tên y hệt step
+        /// (Hs.Vus.Plugins2.ClassTeacher.PostDeleteAsynchronous), nên rất dễ chọn nhầm.
+        /// </summary>
+        private static bool IsConfusable(string type) =>
+            ComponentCatalog.CanonicalKey(type) == "plugintype";
+
+        /// <summary>
         /// Nói thẳng khi danh sách bị cắt: môi trường có hàng chục nghìn step / web resource,
         /// không gõ gì thì cái hiện ra chỉ là mấy nghìn tên đầu theo alphabet.
         /// </summary>
@@ -176,8 +207,17 @@ namespace DeployToSolution
 
         private void Settle(string key, List<string> names, string hint)
         {
+            // Cảnh báo loại dễ nhầm phải hiện kể cả khi chưa kết nối - nó nói về lựa chọn Type,
+            // không phải về dữ liệu lấy được.
+            var warn = IsConfusable(SelectedType);
+
             _loadedKey = key;
-            Hint.Text = hint;
+            Hint.Text = warn
+                ? "PluginType là CLASS plugin (componenttype 90), KHÔNG phải step. Class hay được đặt tên " +
+                  "y hệt step nên rất dễ nhầm — muốn add step thì chọn PluginStep.  " + hint
+                : hint;
+            Hint.Foreground = warn ? Brushes.Firebrick : CalmHint;
+            Hint.FontWeight = warn ? FontWeights.SemiBold : FontWeights.Normal;
             SetNames(names);
         }
 
@@ -268,7 +308,7 @@ namespace DeployToSolution
         {
             var names = _all.Where(i => i.Checked).Select(i => i.Name).ToList();
 
-            var scoped = ComponentCatalog.TryGetTableScope(TypeCombo.Text ?? "", out var separator);
+            var scoped = ComponentCatalog.TryGetTableScope(SelectedType, out var separator);
             var table = (TableCombo.Text ?? "").Trim();
 
             foreach (var line in ManualLines(ManualBox.Text))
@@ -315,7 +355,7 @@ namespace DeployToSolution
 
         private bool Emit()
         {
-            var type = (TypeCombo.Text ?? "").Trim();
+            var type = SelectedType.Trim();
             if (type.Length == 0)
             {
                 MessageBox.Show(this, "Chọn Type trước.", "Thêm dòng",

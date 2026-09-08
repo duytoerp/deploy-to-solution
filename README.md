@@ -141,8 +141,15 @@ một dòng riêng. Không phải thêm từng dòng trống rồi gõ lại t�
 - **IncludeAll** chỉ bật được khi Type là `Table`.
 - Dòng chữ xám nói luôn **đang đọc bảng nào của Dataverse** (`đọc từ sdkmessageprocessingsteps`),
   để phân biệt ngay `PluginStep` với `PluginType` — tên plugin type và tên step rất giống nhau.
+- Chọn `PluginType` thì có **cảnh báo đỏ**: PluginType là *class* plugin (componenttype 90), không
+  phải step. Class hay được đặt tên y hệt step (`Hs.Vus.Plugins2.ClassTeacher.PostDeleteAsynchronous`)
+  nên nhìn danh sách không phân biệt được — muốn add step thì phải chọn `PluginStep`.
 - Dropdown Type không còn hiện hai mục cho cùng một loại (trước đây có cả `PluginStep` lẫn
   `SDK Message Processing Step`, cả `PluginType` lẫn `Plugin Type` — rất dễ chọn nhầm).
+- Ô Type **không gõ được nữa, chỉ bấm chọn** (gõ chữ vẫn nhảy tới mục tương ứng). Ô Type gõ được thì
+  WPF tự hoàn thành chữ và nhảy qua lại giữa `PluginAssembly` / `PluginType` / `PluginStep`.
+  **Lăn chuột khi dropdown đang đóng cũng không đổi lựa chọn nữa** — đây là kiểu đổi nhầm âm thầm
+  nhất: chọn đúng `PluginStep` rồi lăn chuột một nấc là thành `PluginType` mà không hay biết.
 - Ô **gõ / dán tên** ở dưới dùng được cả khi chưa kết nối. Mỗi dòng một tên; dòng bắt đầu bằng `#`
   bị bỏ qua, dấu `- ` đầu dòng được cắt nên **dán thẳng từ Báo cáo deploy** cũng chạy. Đang ở phạm vi
   một bảng thì tên gõ tay tự được gắn tiền tố bảng.
