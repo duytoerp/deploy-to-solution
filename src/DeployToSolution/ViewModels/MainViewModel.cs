@@ -659,7 +659,7 @@ namespace DeployToSolution.ViewModels
         /// </summary>
         private void AddRow()
         {
-            var dialog = new AddRowsWindow(TypeNames, _catalog) { Owner = Application.Current?.MainWindow };
+            var dialog = new AddRowsWindow(TypeNames, _catalog, Info) { Owner = Application.Current?.MainWindow };
             dialog.RowsRequested += InsertRows;
             try { dialog.ShowDialog(); }
             finally { dialog.RowsRequested -= InsertRows; }

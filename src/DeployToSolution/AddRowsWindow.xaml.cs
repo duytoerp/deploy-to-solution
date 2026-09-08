@@ -35,6 +35,7 @@ namespace DeployToSolution
         private static readonly Brush CalmHint = new SolidColorBrush(Color.FromRgb(0x60, 0x5E, 0x5C));
 
         private readonly ComponentCatalog _catalog;               // null khi chưa kết nối
+        private readonly Action<string> _log;
         private readonly List<PickName> _all = new List<PickName>();
         private readonly ObservableCollection<PickName> _shown = new ObservableCollection<PickName>();
 
@@ -48,10 +49,11 @@ namespace DeployToSolution
         /// <summary>Các dòng người dùng bấm thêm. Bắn nhiều lần nếu bấm "Thêm &amp; chọn tiếp".</summary>
         public event Action<List<ComponentRow>> RowsRequested;
 
-        public AddRowsWindow(IEnumerable<string> typeNames, ComponentCatalog catalog)
+        public AddRowsWindow(IEnumerable<string> typeNames, ComponentCatalog catalog, Action<string> log = null)
         {
             InitializeComponent();
             _catalog = catalog;
+            _log = log;
 
             // Chưa kết nối thì vẫn phải chọn được Type: dùng danh sách tên quen thuộc.
             var types = (typeNames ?? Enumerable.Empty<string>()).ToList();
@@ -168,7 +170,22 @@ namespace DeployToSolution
 
             if (token != _loadToken) return;   // người dùng đã đổi Type trong lúc chờ
 
+            // Ghi lại đã đọc bảng nào, được bao nhiêu tên, ba tên đầu là gì. Nhìn nhật ký là đối
+            // chiếu được ngay với màn hình solution trên web, khỏi phải đoán.
+            _log?.Invoke($"Gợi ý {type} ({Source(type)}): {names.Count} tên" +
+                         (names.Count > 0 ? ". Ví dụ: " + string.Join("  |  ", names.Take(3)) : "") +
+                         (filter.Length > 0 ? $"   [lọc: {filter}]" : ""));
+
             Settle(key, names, Describe(type, names, filter));
+        }
+
+        /// <summary>Bảng Dataverse và mã componenttype của loại đang chọn, viết gọn cho một dòng.</summary>
+        private string Source(string type)
+        {
+            var table = _catalog?.SourceTable(type);
+            var code = _catalog?.MatchType(type)?.Value;
+            if (string.IsNullOrEmpty(table)) return code == null ? "?" : $"componenttype {code}";
+            return code == null ? table : $"{table}, componenttype {code}";
         }
 
         /// <summary>
@@ -186,9 +203,8 @@ namespace DeployToSolution
         {
             var min = ComponentCatalog.SearchMinLength;
 
-            // Nói thẳng đang đọc bảng nào: nhìn là biết ngay đây là step hay plugin type.
-            var source = _catalog.SourceTable(type);
-            var from = string.IsNullOrEmpty(source) ? "" : $"  ·  đọc từ {source}";
+            // Nói thẳng đang đọc bảng nào và mã componenttype: nhìn là biết ngay step hay plugin type.
+            var from = $"  ·  đọc từ {Source(type)}";
 
             if (_catalog.SearchesOnServer(type) && filter.Length < min)
                 return $"Môi trường có rất nhiều {type}, danh sách dưới đây mới là {names.Count} tên đầu " +
