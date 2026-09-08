@@ -316,14 +316,18 @@ namespace DeployToSolution.Services
 
         public ComponentCatalog(DataverseClient client) => _client = client;
 
-        /// <summary>Tên loại theo cách gọi quen của team, dùng cho dropdown kể cả khi chưa kết nối.</summary>
+        /// <summary>
+        /// Tên loại cho dropdown, dùng được kể cả khi chưa kết nối. Viết đúng như cây Objects của
+        /// Power Apps ("Plug-in step", "Web resource") để nhìn màn hình solution rồi chọn ở đây là khớp.
+        /// Normalize() bỏ dấu cách và gạch nối nên cách viết cũ ("PluginStep") vẫn nạp được từ Excel.
+        /// </summary>
         public static readonly string[] FriendlyTypeNames =
         {
-            "Table", "Column", "Choice", "View", "Form", "Chart", "Workflow", "BPF", "CloudFlow",
-            "PluginAssembly", "PluginType", "PluginStep", "WebResource", "App", "CanvasApp",
-            "SecurityRole", "ColumnSecurityProfile", "ConnectionReference", "EnvironmentVariable",
-            "Relationship", "Key", "CustomApi", "CustomControl", "SiteMap", "ServiceEndpoint",
-            "Report", "EmailTemplate", "SLA"
+            "Table", "Column", "Choice", "View", "Form", "Chart", "Process", "BPF", "Cloud flow",
+            "Plug-in assembly", "Plug-in type", "Plug-in step", "Web resource", "App", "Canvas app",
+            "Security role", "Column security profile", "Connection reference", "Environment variable",
+            "Relationship", "Key", "Custom API", "Custom control", "Site map", "Service endpoint",
+            "Report", "Email template", "SLA"
         };
 
         public List<ComponentTypeDef> Types { get; } = new List<ComponentTypeDef>();

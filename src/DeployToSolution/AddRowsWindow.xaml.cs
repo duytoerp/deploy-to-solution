@@ -213,8 +213,9 @@ namespace DeployToSolution
 
             _loadedKey = key;
             Hint.Text = warn
-                ? "PluginType là CLASS plugin (componenttype 90), KHÔNG phải step. Class hay được đặt tên " +
-                  "y hệt step nên rất dễ nhầm — muốn add step thì chọn PluginStep.  " + hint
+                ? "Plug-in type là CLASS plugin (componenttype 90), KHÔNG phải step, và không có trong " +
+                  "cây Objects của Power Apps. Class hay được đặt tên y hệt step nên rất dễ nhầm — " +
+                  "các dòng trong \"Plug-in steps\" trên web nằm ở Plug-in step.  " + hint
                 : hint;
             Hint.Foreground = warn ? Brushes.Firebrick : CalmHint;
             Hint.FontWeight = warn ? FontWeights.SemiBold : FontWeights.Normal;

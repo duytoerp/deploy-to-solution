@@ -66,10 +66,10 @@ Table,hs_api_log,N
 Table,hs_care_certificate_test,Y
 Column,hs_api_log.hs_retry_count,N
 BPF,[BPF] Incident Report Process,N
-Workflow,[WF] Incident Report Change Stage Process,N
-PluginAssembly,VUS.Core.Plugins,N
-PluginStep,VUS.Core.Plugins.PreUpdateInvoice,N
-WebResource,hs_/js/invoice_form.js,N
+Process,[WF] Incident Report Change Stage Process,N
+Plug-in assembly,VUS.Core.Plugins,N
+Plug-in step,VUS.Core.Plugins.PreUpdateInvoice,N
+Web resource,hs_/js/invoice_form.js,N
 Choice,hs_care_status_choice,N
 View,hs_api_log|Active API Logs,N
 Form,hs_api_log|Information,N
@@ -89,14 +89,14 @@ Form,hs_api_log|Information,N
 | `Table` | logical name, schema name hoặc display name | `hs_api_log` / `API Log` |
 | `Column` | `bang.cot` | `hs_api_log.hs_retry_count` |
 | `View` / `Form` / `Chart` | `bang|tên`, thêm `|biến thể` nếu trùng | `hs_api_log|Information|Main` |
-| `Workflow` / `BPF` / `CloudFlow` | đúng tên process | `[WF][Invoice] Update Canceled Date` |
-| `PluginAssembly` | tên assembly | `VUS.Core.Plugins` |
-| `PluginStep` | tên step (cột **Name** trong Plug-in steps) | `VUS.Core.Plugins.PreUpdateInvoice` |
-| `WebResource` | name của web resource | `hs_/js/invoice_form.js` |
+| `Process` / `BPF` / `Cloud flow` | đúng tên process | `[WF][Invoice] Update Canceled Date` |
+| `Plug-in assembly` | tên assembly | `VUS.Core.Plugins` |
+| `Plug-in step` | đúng tên trong **Plug-in steps** của solution trên web | `VUS.Core.Plugins.PreUpdateInvoice` |
+| `Web resource` | name của web resource | `hs_/js/invoice_form.js` |
 | `Choice` | tên global choice | `hs_care_status_choice` |
-| `ConnectionReference` | logical name của connection reference | `hs_sharedcommon..._abc12` |
-| `EnvironmentVariable` | schema name | `hs_ApiBaseUrl` |
-| `SecurityRole` | tên role (lấy role gốc ở root business unit) | `VUS Core User` |
+| `Connection reference` | logical name của connection reference | `hs_sharedcommon..._abc12` |
+| `Environment variable` | schema name | `hs_ApiBaseUrl` |
+| `Security role` | tên role (lấy role gốc ở root business unit) | `VUS Core User` |
 | `Relationship` | schema name của relationship | `hs_account_hs_api_log` |
 
 ### Gợi ý tên tự động
@@ -118,8 +118,8 @@ Danh sách ưu tiên lọc `ismanaged eq false` (component của bạn, không l
 bỏ bản ghi đã xoá (`componentstate` 2/3 — add không bao giờ được), và giới hạn 2000 dòng. Lọc xong
 mà rỗng thì app tự nới ra lấy cả managed, nên component managed vẫn tìm được.
 
-**Gõ ít nhất 3 ký tự với những loại nhiều bản ghi.** `PluginStep`, `WebResource`, `Workflow`,
-`SecurityRole`... nằm trong bảng dữ liệu có tới hàng chục nghìn dòng, phần lớn là bản ghi nội bộ của
+**Gõ ít nhất 3 ký tự với những loại nhiều bản ghi.** `Plug-in step`, `Web resource`, `Process`,
+`Security role`... nằm trong bảng dữ liệu có tới hàng chục nghìn dòng, phần lớn là bản ghi nội bộ của
 nền tảng. Lấy 2000 dòng đầu theo alphabet thì `Hs.Vus.*` bị cắt mất sạch. Nên từ ký tự thứ 3 trở đi,
 app đẩy luôn `contains(...)` xuống Dataverse thay vì lọc trên máy — gõ `Hs.` là ra đúng cụm của bạn.
 Ba ký tự đầu quyết định mẻ dữ liệu, gõ tiếp chỉ lọc lại tại chỗ nên không bắn thêm truy vấn.
@@ -131,7 +131,7 @@ Nút **Thêm dòng** mở một popup: chọn **một Type**, rồi **tick nhi�
 một dòng riêng. Không phải thêm từng dòng trống rồi gõ lại từ đầu nữa.
 
 - Ô **Lọc** thu hẹp danh sách, ví dụ gõ `Hs.Vus.Warehouse` rồi bấm **Chọn hết đang hiện** để lấy
-  trọn cụm step của một assembly. Với `PluginStep` / `WebResource` / `Workflow` / `SecurityRole`,
+  trọn cụm step của một assembly. Với `Plug-in step` / `Web resource` / `Process` / `Security role`,
   **phải gõ ít nhất 3 ký tự** thì app mới tìm thẳng trên môi trường — danh sách lúc chưa gõ gì chỉ là
   2000 tên đầu theo alphabet nên thường toàn bản ghi hệ thống. Dòng chữ xám dưới ô Type nói rõ đang
   ở trạng thái nào.
@@ -140,16 +140,16 @@ một dòng riêng. Không phải thêm từng dòng trống rồi gõ lại t�
   `bảng|tên`).
 - **IncludeAll** chỉ bật được khi Type là `Table`.
 - Dòng chữ xám nói luôn **đang đọc bảng nào của Dataverse** (`đọc từ sdkmessageprocessingsteps`),
-  để phân biệt ngay `PluginStep` với `PluginType` — tên plugin type và tên step rất giống nhau.
-- Chọn `PluginType` thì có **cảnh báo đỏ**: PluginType là *class* plugin (componenttype 90), không
+  để phân biệt ngay `Plug-in step` với `Plug-in type` — tên plugin type và tên step rất giống nhau.
+- Chọn `Plug-in type` thì có **cảnh báo đỏ**: đây là *class* plugin (componenttype 90), không
   phải step. Class hay được đặt tên y hệt step (`Hs.Vus.Plugins2.ClassTeacher.PostDeleteAsynchronous`)
-  nên nhìn danh sách không phân biệt được — muốn add step thì phải chọn `PluginStep`.
-- Dropdown Type không còn hiện hai mục cho cùng một loại (trước đây có cả `PluginStep` lẫn
-  `SDK Message Processing Step`, cả `PluginType` lẫn `Plugin Type` — rất dễ chọn nhầm).
+  nên nhìn danh sách không phân biệt được — các dòng trong **Plug-in steps** trên web nằm ở `Plug-in step`.
+- Dropdown Type không còn hiện hai mục cho cùng một loại (trước đây có cả `Plug-in step` lẫn
+  `SDK Message Processing Step`, cả `Plug-in type` lẫn `Plugin Type` — rất dễ chọn nhầm).
 - Ô Type **không gõ được nữa, chỉ bấm chọn** (gõ chữ vẫn nhảy tới mục tương ứng). Ô Type gõ được thì
-  WPF tự hoàn thành chữ và nhảy qua lại giữa `PluginAssembly` / `PluginType` / `PluginStep`.
+  WPF tự hoàn thành chữ và nhảy qua lại giữa `Plug-in assembly` / `Plug-in type` / `Plug-in step`.
   **Lăn chuột khi dropdown đang đóng cũng không đổi lựa chọn nữa** — đây là kiểu đổi nhầm âm thầm
-  nhất: chọn đúng `PluginStep` rồi lăn chuột một nấc là thành `PluginType` mà không hay biết.
+  nhất: chọn đúng `Plug-in step` rồi lăn chuột một nấc là thành `Plug-in type` mà không hay biết.
 - Ô **gõ / dán tên** ở dưới dùng được cả khi chưa kết nối. Mỗi dòng một tên; dòng bắt đầu bằng `#`
   bị bỏ qua, dấu `- ` đầu dòng được cắt nên **dán thẳng từ Báo cáo deploy** cũng chạy. Đang ở phạm vi
   một bảng thì tên gõ tay tự được gắn tiền tố bảng.
@@ -182,12 +182,16 @@ Khi trùng, app in sẵn danh sách ứng viên kèm GUID ở cột *Chi tiết*
 ### Type nhận những giá trị nào
 
 Dropdown cột **Type** được nạp **từ chính môi trường** (option set `solutioncomponent.componenttype`),
-nên luôn khớp phiên bản Dataverse của bạn. Ngoài ra app hiểu các bí danh quen thuộc:
+nên luôn khớp phiên bản Dataverse của bạn. Tên hiển thị viết **đúng như cây Objects của Power Apps**
+để nhìn màn hình solution rồi chọn ở đây là khớp:
 
-`Table` `Column` `Choice` `View` `Form` `Chart` `Workflow` `BPF` `CloudFlow` `Process`
-`PluginAssembly` `PluginType` `PluginStep` `WebResource` `App` `CanvasApp` `SecurityRole`
-`ColumnSecurityProfile` `ConnectionReference` `EnvironmentVariable` `Relationship` `Key`
-`CustomApi` `CustomControl`/`PCF` `SiteMap` `ServiceEndpoint` `Report` `EmailTemplate` `SLA`
+`Table` `Column` `Choice` `View` `Form` `Chart` `Process` `BPF` `Cloud flow`
+`Plug-in assembly` `Plug-in type` `Plug-in step` `Web resource` `App` `Canvas app` `Security role`
+`Column security profile` `Connection reference` `Environment variable` `Relationship` `Key`
+`Custom API` `Custom control`/`PCF` `Site map` `Service endpoint` `Report` `Email template` `SLA`
+
+Dấu cách và gạch nối **không tính**, nên file Excel cũ viết liền một từ (`PluginStep`, `WebResource`,
+`SecurityRole`, `CloudFlow`...) vẫn nạp được y nguyên, không phải sửa gì.
 
 Nếu một loại lạ chưa có sẵn, điền **số component type** vào cột `Type` (ví dụ `29`) là được.
 
