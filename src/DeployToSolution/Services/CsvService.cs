@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -21,7 +22,9 @@ namespace DeployToSolution.Services
             if (ext == ".xlsx" || ext == ".xlsm")
                 return FromGrid(ExcelReader.Read(path));
 
-            return Parse(File.ReadAllText(path, DetectEncoding(path)));
+            // Code page 1258 lưu dấu tiếng Việt dạng tổ hợp ("a" + dấu hỏi rời) - chuẩn hoá về dạng dựng sẵn,
+            // không thì "Bảng" đọc ra không bằng "Bảng" trên Dataverse dù nhìn giống hệt.
+            return Parse(File.ReadAllText(path, DetectEncoding(path)).Normalize(NormalizationForm.FormC));
         }
 
         public static List<ComponentRow> Parse(string text)
@@ -110,13 +113,33 @@ namespace DeployToSolution.Services
                 : s;
         }
 
+        /// <summary>
+        /// UTF-8 (có hoặc không BOM) nếu đọc hợp lệ; không thì là file ANSI mà Excel lưu bằng
+        /// "CSV (Comma delimited)" - đọc theo code page ANSI của máy (1258 với Windows tiếng Việt),
+        /// thay vì để tên có dấu thành ký tự rác rồi báo "Không tìm thấy".
+        /// </summary>
         private static Encoding DetectEncoding(string path)
         {
-            using var fs = File.OpenRead(path);
-            var bom = new byte[3];
-            var read = fs.Read(bom, 0, 3);
-            if (read == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) return new UTF8Encoding(true);
-            return new UTF8Encoding(false);
+            var bytes = File.ReadAllBytes(path);
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) return new UTF8Encoding(true);
+
+            try
+            {
+                new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+                return new UTF8Encoding(false);
+            }
+            catch (DecoderFallbackException)
+            {
+                try
+                {
+                    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                    return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.ANSICodePage);
+                }
+                catch
+                {
+                    return new UTF8Encoding(false);
+                }
+            }
         }
 
         private static List<string> SplitLines(string text) =>

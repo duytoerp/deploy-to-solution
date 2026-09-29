@@ -49,7 +49,7 @@ namespace DeployToSolution.ViewModels
             PasteCommand = new RelayCommand(_ => PasteFromClipboard(), _ => !IsBusy);
             ExportCsvCommand = new RelayCommand(_ => ExportList(), _ => Rows.Count > 0);
             AddRowCommand = new RelayCommand(_ => AddRow(), _ => !IsBusy);
-            ClearRowsCommand = new RelayCommand(_ => Rows.Clear(), _ => Rows.Count > 0 && !IsBusy);
+            ClearRowsCommand = new RelayCommand(_ => ClearRows(), _ => Rows.Count > 0 && !IsBusy);
             ResolveCommand = new RelayCommand(async _ => await ResolveAsync(), _ => IsConnected && !IsBusy && Rows.Count > 0);
             RunCommand = new RelayCommand(async _ => await RunAsync(false), _ => IsConnected && !IsBusy && Rows.Count > 0);
             DryRunCommand = new RelayCommand(async _ => await RunAsync(true), _ => IsConnected && !IsBusy && Rows.Count > 0);
@@ -59,9 +59,9 @@ namespace DeployToSolution.ViewModels
             CopyLogCommand = new RelayCommand(_ => CopyLog(), _ => Log.Count > 0);
             OpenLogFolderCommand = new RelayCommand(_ => OpenLogFolder());
             OpenVerificationCommand = new RelayCommand(_ => OpenBrowser(VerificationUri));
-            SelectAllSolutionsCommand = new RelayCommand(_ => SetAllSolutions(true));
-            SelectNoSolutionsCommand = new RelayCommand(_ => SetAllSolutions(false));
-            UnselectSolutionCommand = new RelayCommand(p => { if (p is SolutionTarget s) s.Enabled = false; });
+            SelectAllSolutionsCommand = new RelayCommand(_ => SetAllSolutions(true), _ => !IsBusy);
+            SelectNoSolutionsCommand = new RelayCommand(_ => SetAllSolutions(false), _ => !IsBusy);
+            UnselectSolutionCommand = new RelayCommand(p => { if (p is SolutionTarget s) s.Enabled = false; }, _ => !IsBusy);
 
             NewProjectCommand = new RelayCommand(_ => NewProject(), _ => !IsBusy);
             SaveProjectCommand = new RelayCommand(_ => SaveProject(), _ => !IsBusy && Rows.Count > 0);
@@ -171,6 +171,8 @@ namespace DeployToSolution.ViewModels
         }
 
         private List<SolutionTarget> _allSolutions = new List<SolutionTarget>();
+        private string _solutionsEnvUrl;   // môi trường mà _allSolutions được đọc ra
+        private string _resolvedEnvUrl;    // môi trường mà GUID trên các dòng được tra ra
 
         // ---------- commands ----------
 
@@ -254,6 +256,13 @@ namespace DeployToSolution.ViewModels
                 {
                     var cacheKey = $"{tenant}|{ClientId}|{url}";
                     var cached = RememberSignIn ? SettingsStore.LoadRefreshToken(cacheKey) : null;
+
+                    // Mỗi lần làm mới, Azure AD cấp refresh token mới - lưu lại để lần sau mở app
+                    // không phải dùng một token đã cũ tới cả tháng.
+                    _tokens.RefreshTokenChanged += token =>
+                    {
+                        if (RememberSignIn) SettingsStore.SaveRefreshToken(cacheKey, token);
+                    };
                     var signedIn = false;
 
                     if (!string.IsNullOrEmpty(cached))
@@ -304,6 +313,19 @@ namespace DeployToSolution.ViewModels
                 TypeNames.Clear();
                 foreach (var n in _catalog.TypeNames) TypeNames.Add(n);
 
+                // GUID tìm được ở môi trường trước không dùng được ở môi trường này (bước Kiểm tra tên
+                // bỏ qua dòng đã có GUID) - xoá để lần chạy tới tra lại từ đầu.
+                if (!string.Equals(_resolvedEnvUrl, url, StringComparison.OrdinalIgnoreCase))
+                {
+                    var stale = Rows.Count(r => r.IsResolved);
+                    foreach (var row in Rows) row.ClearResolution();
+                    if (stale > 0 && _resolvedEnvUrl != null)
+                        Warn($"Đổi môi trường từ {_resolvedEnvUrl}: xoá kết quả tìm tên cũ của {stale} dòng, sẽ tra lại khi chạy.");
+                }
+                _resolvedEnvUrl = url;
+
+                _client.Notice += Warn;
+
                 IsConnected = true;
                 Good($"Đã kết nối {url} với {ConnectedAs}. {_catalog.Types.Count} component type khả dụng.");
 
@@ -352,6 +374,7 @@ namespace DeployToSolution.ViewModels
             Solutions.Clear();
             foreach (var s in _allSolutions) s.PropertyChanged -= Solution_PropertyChanged;
             _allSolutions.Clear();
+            _solutionsEnvUrl = null;
             RefreshChosen();
             Status = "Đã đăng xuất";
             Info("Đã đăng xuất và xóa phiên đăng nhập đã lưu.");
@@ -365,16 +388,27 @@ namespace DeployToSolution.ViewModels
                 Status = "Đang tải danh sách solution...";
                 if (_cts == null || _cts.IsCancellationRequested) _cts = new CancellationTokenSource();
 
-                // Dự án đang mở quyết định solution đích; chưa có dự án thì dùng lần tick gần nhất.
-                var wanted = CurrentProject != null
-                    ? CurrentProject.Solutions
-                    : _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName)
-                        .Concat(_settings.LastTargets ?? new List<string>()).ToList();
+                // Dự án đang mở quyết định solution đích (kèm những gì vừa tick/bỏ tick trên màn hình).
+                // Không có dự án: bấm Làm mới thì giữ đúng những gì đang tick; mới kết nối (hoặc vừa
+                // đổi môi trường) thì mới lấy lần chạy gần nhất - đừng tick lại cái người dùng vừa bỏ.
+                var sameEnv = _allSolutions.Count > 0 &&
+                              string.Equals(_solutionsEnvUrl, _client?.EnvironmentUrl, StringComparison.OrdinalIgnoreCase);
+                List<string> wanted;
+                if (CurrentProject != null)
+                {
+                    CurrentProject.Solutions = TargetsFor(CurrentProject);
+                    wanted = CurrentProject.Solutions;
+                }
+                else if (sameEnv)
+                    wanted = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList();
+                else
+                    wanted = _settings.LastTargets ?? new List<string>();
                 var previouslySelected = new HashSet<string>(wanted, StringComparer.OrdinalIgnoreCase);
 
                 foreach (var s in _allSolutions) s.PropertyChanged -= Solution_PropertyChanged;
 
                 _allSolutions = await _solutions.ListSolutionsAsync(_cts.Token);
+                _solutionsEnvUrl = _client?.EnvironmentUrl;
 
                 // Tick lại theo dự án không phải là người dùng sửa dự án.
                 _loadingProject = true;
@@ -399,6 +433,7 @@ namespace DeployToSolution.ViewModels
                     if (missing.Count > 0)
                         Warn($"Dự án \"{CurrentProject.Name}\" có {missing.Count} solution không còn trong " +
                              "môi trường: " + string.Join(", ", missing));
+                    WarnIfOtherEnvironment(CurrentProject);
                 }
                 Info($"Đã tải {_allSolutions.Count} solution unmanaged.");
                 Status = "Đã kết nối";
@@ -459,7 +494,25 @@ namespace DeployToSolution.ViewModels
             try
             {
                 var rows = CsvService.Load(dlg.FileName);
-                Rows.Clear();
+
+                // Dự án tự lưu khi đóng app / đổi dự án, nên thay danh sách mà không hỏi là mất luôn danh sách cũ.
+                var replace = true;
+                if (Rows.Count > 0 && rows.Count > 0)
+                {
+                    var where = CurrentProject == null ? "Danh sách hiện tại" : $"Dự án \"{CurrentProject.Name}\"";
+                    var answer = MessageBox.Show(
+                        $"{where} đang có {Rows.Count} dòng.\n\n" +
+                        $"Yes = THAY bằng {rows.Count} dòng trong file\n" +
+                        $"No = THÊM {rows.Count} dòng vào cuối danh sách\n" +
+                        "Cancel = không nạp\n\n" +
+                        "(Muốn giữ dự án cũ nguyên vẹn: bấm Cancel, tạo Dự án mới rồi nạp lại.)",
+                        "Nạp danh sách", MessageBoxButton.YesNoCancel, MessageBoxImage.Question,
+                        MessageBoxResult.Cancel);
+                    if (answer == MessageBoxResult.Cancel) return;
+                    replace = answer == MessageBoxResult.Yes;
+                }
+
+                if (replace) Rows.Clear();
                 foreach (var r in rows) Rows.Add(r);
                 _settings.LastCsvPath = dlg.FileName;
                 SaveSettings();
@@ -474,6 +527,15 @@ namespace DeployToSolution.ViewModels
             {
                 Error("Đọc file thất bại: " + ex.Message);
             }
+        }
+
+        private void ClearRows()
+        {
+            var where = CurrentProject == null ? "" : $" của dự án \"{CurrentProject.Name}\"";
+            var answer = MessageBox.Show(
+                $"Xóa hết {Rows.Count} dòng{where}?\n\nDự án tự lưu khi đóng app, nên danh sách cũ sẽ mất hẳn.",
+                "Xóa hết", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+            if (answer == MessageBoxResult.OK) Rows.Clear();
         }
 
         /// <summary>Ghi file template Excel đã nhúng trong exe ra đĩa rồi mở lên.</summary>
@@ -655,8 +717,9 @@ namespace DeployToSolution.ViewModels
             try
             {
                 var targets = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList();
-                var text = DeployReport.Build(Rows, _catalog, targets, EnvironmentUrl);
-                var grid = DeployReport.ToGrid(Rows, _catalog, targets, EnvironmentUrl);
+                var environment = ConnectedUrl ?? EnvironmentUrl;
+                var text = DeployReport.Build(Rows, _catalog, targets, environment);
+                var grid = DeployReport.ToGrid(Rows, _catalog, targets, environment);
 
                 var window = new ReportWindow(text, grid) { Owner = Application.Current?.MainWindow };
                 window.ShowDialog();
@@ -685,13 +748,20 @@ namespace DeployToSolution.ViewModels
         /// Nạp và lọc gợi ý cho cột Name theo Type của dòng, gọi lại mỗi lần người dùng gõ.
         /// Danh sách đầy đủ được cache trong catalog; ở đây chỉ lọc lại theo chữ đang gõ.
         /// </summary>
-        public async Task LoadNameSuggestionsAsync(ComponentRow row, string currentText = null)
+        /// <returns>
+        /// False khi không đổ gợi ý nào, kể cả khi kết quả về muộn hơn một lượt gõ mới hơn - lúc đó
+        /// người gọi không được đụng vào ô chữ, người dùng đã gõ tiếp.
+        /// </returns>
+        public async Task<bool> LoadNameSuggestionsAsync(ComponentRow row, string currentText = null)
         {
-            if (row == null || _catalog == null || !IsConnected) return;
+            if (row == null) return false;
+            var ticket = ++row.SuggestionTicket;
+
+            if (_catalog == null || !IsConnected) return false;
 
             var text = currentText ?? row.Name ?? "";
             var key = _catalog.SuggestionKey(row.Type, text);
-            if (string.IsNullOrEmpty(key)) return;
+            if (string.IsNullOrEmpty(key)) return false;
 
             List<string> all;
             try
@@ -706,8 +776,11 @@ namespace DeployToSolution.ViewModels
                     row.SuggestionKey = key;
                     Info($"Không lấy được gợi ý cho Type '{row.Type}': {ex.Message}");
                 }
-                return;
+                return false;
             }
+
+            // Trong lúc chờ mạng người dùng đã gõ tiếp: kết quả này ứng với chữ cũ, đừng đè lên gợi ý mới.
+            if (ticket != row.SuggestionTicket) return false;
 
             row.SuggestionKey = key;
 
@@ -717,10 +790,11 @@ namespace DeployToSolution.ViewModels
 
             var shown = matches.Take(200).ToList();
 
-            if (row.NameSuggestions.SequenceEqual(shown, StringComparer.Ordinal)) return;
+            if (row.NameSuggestions.SequenceEqual(shown, StringComparer.Ordinal)) return true;
 
             row.NameSuggestions.Clear();
             foreach (var n in shown) row.NameSuggestions.Add(n);
+            return true;
         }
 
         /// <summary>Báo cho view biết dòng vừa thêm, để cuộn tới và chọn sẵn.</summary>
@@ -732,7 +806,11 @@ namespace DeployToSolution.ViewModels
         /// </summary>
         private void AddRow()
         {
-            var dialog = new AddRowsWindow(TypeNames, _catalog, Info) { Owner = Application.Current?.MainWindow };
+            // Đã đăng xuất thì catalog cũ không còn token: đưa null để popup chạy chế độ gõ tay.
+            var dialog = new AddRowsWindow(TypeNames, IsConnected ? _catalog : null, Info)
+            {
+                Owner = Application.Current?.MainWindow
+            };
             dialog.RowsRequested += InsertRows;
             try { dialog.ShowDialog(); }
             finally { dialog.RowsRequested -= InsertRows; }
@@ -760,14 +838,33 @@ namespace DeployToSolution.ViewModels
         private static string RowKey(ComponentRow row) =>
             $"{ComponentCatalog.CanonicalKey(row.Type)}|{(row.Name ?? "").Trim()}";
 
+        /// <summary>
+        /// Đang chạy thì không cho xoá/nhân đôi/sửa dòng: vòng lặp đã chốt danh sách từ trước,
+        /// xoá một dòng khỏi màn hình lúc này không ngăn được nó bị add.
+        /// </summary>
+        private bool BlockedWhileBusy()
+        {
+            if (!IsBusy) return false;
+            Warn("Đang chạy - chờ xong (hoặc bấm Hủy) rồi mới sửa danh sách.");
+            return true;
+        }
+
         public void RemoveRows(IEnumerable<ComponentRow> rows)
         {
+            if (BlockedWhileBusy()) return;
             foreach (var r in rows.ToList()) Rows.Remove(r);
+        }
+
+        public void SetInclude(IEnumerable<ComponentRow> rows, bool include)
+        {
+            if (BlockedWhileBusy()) return;
+            foreach (var r in rows.ToList()) r.Include = include;
         }
 
         /// <summary>Chèn bản sao ngay dưới dòng gốc, tiện khi thêm nhiều component cùng loại.</summary>
         public void DuplicateRows(IEnumerable<ComponentRow> rows)
         {
+            if (BlockedWhileBusy()) return;
             foreach (var r in rows.ToList())
             {
                 var at = Rows.IndexOf(r);
@@ -820,7 +917,12 @@ namespace DeployToSolution.ViewModels
         private void LoadProjects()
         {
             Projects.Clear();
-            foreach (var project in ProjectStore.LoadAll()) Projects.Add(project);
+            var loaded = ProjectStore.LoadAll(out var broken);
+            foreach (var project in loaded) Projects.Add(project);
+
+            if (broken.Count > 0)
+                Warn($"Không đọc được {broken.Count} file dự án (JSON hỏng?): {string.Join(", ", broken)}. " +
+                     $"File vẫn nằm trong {ProjectStore.Dir}, sửa tay rồi mở lại app.");
         }
 
         private void SetCurrentQuietly(DeployProject project)
@@ -886,12 +988,48 @@ namespace DeployToSolution.ViewModels
             if (missing.Count > 0)
                 Warn($"Dự án \"{project.Name}\" có {missing.Count} solution không còn trong môi trường: " +
                      string.Join(", ", missing));
+            WarnIfOtherEnvironment(project);
+        }
+
+        /// <summary>
+        /// Solution đích của dự án tính theo màn hình. Chưa tải danh sách solution (chưa kết nối, vừa
+        /// đăng xuất) thì không biết người dùng tick gì, nên giữ nguyên của dự án; solution không có
+        /// trong môi trường đang kết nối cũng giữ lại, chỉ bỏ những cái người dùng thật sự bỏ tick.
+        /// </summary>
+        private List<string> TargetsFor(DeployProject project)
+        {
+            var saved = project?.Solutions ?? new List<string>();
+            if (_allSolutions.Count == 0) return saved.ToList();
+
+            var known = new HashSet<string>(_allSolutions.Select(s => s.UniqueName), StringComparer.OrdinalIgnoreCase);
+            return saved.Where(n => !known.Contains(n))
+                .Concat(_allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>Môi trường thật sự đang kết nối; ô URL có thể đã bị sửa sau khi kết nối.</summary>
+        private string ConnectedUrl => IsConnected && _client != null ? _client.EnvironmentUrl : null;
+
+        /// <summary>Dự án được lập cho một môi trường khác môi trường đang kết nối.</summary>
+        private bool IsOtherEnvironment(DeployProject project) =>
+            project != null && ConnectedUrl != null && !string.IsNullOrWhiteSpace(project.EnvironmentUrl) &&
+            !string.Equals(NormalizeUrl(project.EnvironmentUrl), ConnectedUrl, StringComparison.OrdinalIgnoreCase);
+
+        private void WarnIfOtherEnvironment(DeployProject project)
+        {
+            if (IsOtherEnvironment(project))
+                Warn($"Dự án \"{project.Name}\" được lập cho {project.EnvironmentUrl}, nhưng đang kết nối " +
+                     $"{ConnectedUrl}. Solution đích được tick theo tên - kiểm tra kỹ trước khi ADD.");
         }
 
         private void CaptureInto(DeployProject project)
         {
-            project.EnvironmentUrl = EnvironmentUrl;
-            project.Solutions = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList();
+            // Môi trường của dự án chỉ gán lần đầu, hoặc sau một lần deploy thật (RunAsync). Kết nối nhầm
+            // sang môi trường khác rồi đóng app không được âm thầm gắn dự án sang môi trường đó - không thì
+            // cảnh báo "khác môi trường" lúc bấm ADD mất tác dụng.
+            if (string.IsNullOrWhiteSpace(project.EnvironmentUrl)) project.EnvironmentUrl = ConnectedUrl ?? EnvironmentUrl;
+            project.Solutions = TargetsFor(project);
             project.AddRequiredComponents = AddRequiredComponents;
             project.CleanupArchival = CleanupArchival;
             project.Rows = Rows.Select(r => new ProjectRow
@@ -929,10 +1067,10 @@ namespace DeployToSolution.ViewModels
             var project = new DeployProject
             {
                 Name = name,
-                EnvironmentUrl = EnvironmentUrl,
+                EnvironmentUrl = ConnectedUrl ?? EnvironmentUrl,
                 AddRequiredComponents = AddRequiredComponents,
                 CleanupArchival = CleanupArchival,
-                Solutions = _allSolutions.Where(s => s.Enabled).Select(s => s.UniqueName).ToList()
+                Solutions = TargetsFor(CurrentProject)
             };
 
             try { ProjectStore.Save(project); }
@@ -958,7 +1096,13 @@ namespace DeployToSolution.ViewModels
             var name = AskProjectName("Lưu thành dự án mới", suggestion);
             if (name == null) return;
 
-            var project = new DeployProject { Name = name, Note = CurrentProject?.Note ?? "" };
+            var project = new DeployProject
+            {
+                Name = name,
+                Note = CurrentProject?.Note ?? "",
+                EnvironmentUrl = CurrentProject?.EnvironmentUrl ?? "",
+                Solutions = CurrentProject?.Solutions.ToList() ?? new List<string>()
+            };
             CaptureInto(project);
 
             try { ProjectStore.Save(project); }
@@ -985,7 +1129,8 @@ namespace DeployToSolution.ViewModels
             {
                 project.Name = name;
                 ProjectStore.Save(project);
-                ProjectStore.Delete(oldName);
+                // Chỉ đổi hoa/thường thì hai tên là CÙNG một file trên Windows - xoá là mất luôn file vừa ghi.
+                if (!ProjectStore.SameFile(oldName, name)) ProjectStore.Delete(oldName);
             }
             catch (Exception ex)
             {
@@ -995,8 +1140,14 @@ namespace DeployToSolution.ViewModels
             }
 
             // ComboBox hiện Name, mà Name không phải thuộc tính quan sát được -> dựng lại mục đó.
+            // Bỏ mục đang chọn thì ComboBox đẩy null về CurrentProject; chặn lại, đây không phải người dùng chọn.
             var at = Projects.IndexOf(project);
-            if (at >= 0) { Projects.RemoveAt(at); Projects.Insert(at, project); }
+            if (at >= 0)
+            {
+                _switchingProject = true;
+                try { Projects.RemoveAt(at); Projects.Insert(at, project); }
+                finally { _switchingProject = false; }
+            }
             SetCurrentQuietly(project);
 
             _settings.LastProject = name;
@@ -1015,9 +1166,11 @@ namespace DeployToSolution.ViewModels
                 "Xóa dự án", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
             if (answer != MessageBoxResult.OK) return;
 
-            ProjectStore.Delete(project.Name);
-            Projects.Remove(project);
+            // Bỏ chọn TRƯỚC khi bỏ khỏi Projects: bỏ mục đang chọn thì ComboBox đẩy null về CurrentProject,
+            // setter lại lưu dự án hiện tại trước khi đổi - tức là ghi lại đúng file vừa xoá.
             SetCurrentQuietly(null);
+            Projects.Remove(project);
+            ProjectStore.Delete(project.Name);
 
             IsProjectDirty = false;
             _settings.LastProject = "";
@@ -1034,9 +1187,16 @@ namespace DeployToSolution.ViewModels
                 name =>
                 {
                     if (string.IsNullOrWhiteSpace(name)) return "Tên dự án không được để trống.";
-                    if (!string.Equals(name, allowSame, StringComparison.OrdinalIgnoreCase) &&
-                        Projects.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
-                        return $"Đã có dự án tên \"{name}\".";
+
+                    // Đổi tên chính nó (kể cả chỉ đổi hoa/thường) thì trùng file là đương nhiên.
+                    if (allowSame != null && ProjectStore.SameFile(name, allowSame)) return null;
+
+                    // So theo file thật chứ không theo chữ: "a/b" và "a_b" cùng ra a_b.json, và file
+                    // JSON hỏng (không hiện trong danh sách) cũng không được bị ghi đè.
+                    var clash = Projects.FirstOrDefault(p => ProjectStore.SameFile(p.Name, name));
+                    if (clash != null) return $"Tên này trùng file với dự án \"{clash.Name}\".";
+                    if (ProjectStore.Exists(name))
+                        return $"Đã có file {Path.GetFileName(ProjectStore.FileFor(name))} trong thư mục dự án.";
                     return null;
                 });
         }
@@ -1081,10 +1241,12 @@ namespace DeployToSolution.ViewModels
 
         // ---------- resolve + run ----------
 
-        private async Task<bool> ResolveAsync()
+        private enum ResolveOutcome { AllFound, SomeMissing, Stopped }
+
+        private async Task<ResolveOutcome> ResolveAsync()
         {
             var targets = Rows.Where(r => r.Include).ToList();
-            if (targets.Count == 0) { Warn("Không có dòng nào được chọn."); return false; }
+            if (targets.Count == 0) { Warn("Không có dòng nào được chọn."); return ResolveOutcome.Stopped; }
 
             IsBusy = true;
             _cts = new CancellationTokenSource();
@@ -1122,8 +1284,17 @@ namespace DeployToSolution.ViewModels
                     Progress++;
                 }
             }
-            catch (OperationCanceledException) { Warn("Đã hủy."); }
-            catch (Exception ex) { Error(ex.Message); }
+            catch (OperationCanceledException)
+            {
+                // Hủy là dừng hẳn: đừng để RunAsync coi "chưa gặp dòng lỗi nào" là "tìm đủ" rồi chạy tiếp.
+                Warn($"Đã hủy khi đang kiểm tra ({ok}/{targets.Count} đã tìm thấy).");
+                return ResolveOutcome.Stopped;
+            }
+            catch (Exception ex)
+            {
+                Error(ex.Message);
+                return ResolveOutcome.Stopped;
+            }
             finally
             {
                 IsBusy = false;
@@ -1132,7 +1303,7 @@ namespace DeployToSolution.ViewModels
 
             if (bad == 0) Good($"Tìm thấy đủ {ok}/{targets.Count} component.");
             else Warn($"Tìm thấy {ok}/{targets.Count}, còn {bad} dòng lỗi - sửa rồi chạy lại.");
-            return bad == 0;
+            return bad == 0 ? ResolveOutcome.AllFound : ResolveOutcome.SomeMissing;
         }
 
         private async Task RunAsync(bool dryRun)
@@ -1147,7 +1318,9 @@ namespace DeployToSolution.ViewModels
             var rows = Rows.Where(r => r.Include).ToList();
             if (rows.Count == 0) { Warn("Không có dòng nào được chọn."); return; }
 
-            if (!await ResolveAsync())
+            var outcome = await ResolveAsync();
+            if (outcome == ResolveOutcome.Stopped) return;
+            if (outcome == ResolveOutcome.SomeMissing)
             {
                 var answer = MessageBox.Show(
                     "Có dòng chưa tìm được component. Vẫn tiếp tục với những dòng hợp lệ?",
@@ -1158,15 +1331,37 @@ namespace DeployToSolution.ViewModels
             var valid = rows.Where(r => r.IsResolved).ToList();
             if (valid.Count == 0) { Warn("Không có dòng hợp lệ để add."); return; }
 
+            // Chốt mọi thứ lúc bắt đầu: đổi dự án / tùy chọn giữa chừng không được làm lệch lần chạy này.
+            var project = CurrentProject;
+            var addRequired = AddRequiredComponents;
+            var cleanupArchival = CleanupArchival;
+            var environment = ConnectedUrl ?? EnvironmentUrl;
+
             if (!dryRun)
             {
+                // Solution được tick lại tự động theo unique name, mà DEV và UAT hay có solution trùng tên -
+                // nên phải nói rõ đang ghi vào môi trường nào, bằng tài khoản nào.
+                var otherEnv = IsOtherEnvironment(project);
+                var warning = otherEnv
+                    ? $"CẢNH BÁO: dự án \"{project.Name}\" được lập cho {project.EnvironmentUrl}, " +
+                      "KHÁC môi trường đang kết nối.\n\n"
+                    : "";
+
                 var confirm = MessageBox.Show(
+                    warning +
+                    $"Môi trường : {environment}\n" +
+                    $"Tài khoản  : {ConnectedAs}\n\n" +
                     $"Add {valid.Count} component vào {selectedSolutions.Count} solution:\n\n" +
                     string.Join("\n", selectedSolutions.Select(s => "  - " + s.UniqueName)) +
                     "\n\nTiếp tục?",
-                    "Xác nhận", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+                    "Xác nhận", MessageBoxButton.OKCancel,
+                    otherEnv ? MessageBoxImage.Warning : MessageBoxImage.Question,
+                    otherEnv ? MessageBoxResult.Cancel : MessageBoxResult.OK);
                 if (confirm != MessageBoxResult.OK) return;
             }
+
+            // Trạng thái cuối của một dòng là trạng thái tệ nhất qua mọi solution, tính lại từ đầu mỗi lần chạy.
+            foreach (var row in valid) row.State = RowState.Resolved;
 
             IsBusy = true;
             _cts = new CancellationTokenSource();
@@ -1209,11 +1404,15 @@ namespace DeployToSolution.ViewModels
                             var present = await _solutions.ContainsAsync(
                                 solutionId, row.ObjectId, row.ComponentType, _cts.Token);
 
-                            if (present && !row.IncludeAll)
+                            // IncludeAll chỉ có nghĩa với Table; dòng khác lỡ tick thì coi như không tick.
+                            var isEntity = _catalog != null && row.ComponentType == _catalog.EntityComponentType;
+                            var includeAll = isEntity && row.IncludeAll;
+
+                            if (present && !includeAll)
                             {
                                 already++;
                                 notes[row].Add($"{solution.UniqueName}: đã có");
-                                if (row.State != RowState.Added) row.State = RowState.AlreadyIn;
+                                Promote(row, RowState.AlreadyIn);
                                 Info($"  [đã có] {row.Type} {row.Name}");
                             }
                             else if (dryRun)
@@ -1226,28 +1425,26 @@ namespace DeployToSolution.ViewModels
                             else
                             {
                                 // Chỉ Entity mới chấp nhận DoNotIncludeSubcomponents.
-                                bool? subcomponents = _catalog != null && row.ComponentType == _catalog.EntityComponentType
-                                    ? !row.IncludeAll
-                                    : (bool?)null;
+                                bool? subcomponents = isEntity ? !includeAll : (bool?)null;
 
                                 await _solutions.AddAsync(solution.UniqueName, row.ObjectId, row.ComponentType,
-                                    subcomponents, AddRequiredComponents, _cts.Token);
+                                    subcomponents, addRequired, _cts.Token);
                                 added++;
                                 var what = present ? "đã cập nhật (include all)" : "đã add";
                                 notes[row].Add($"{solution.UniqueName}: {what}");
-                                row.State = RowState.Added;
+                                Promote(row, RowState.Added);
                                 Good($"  [{what}] {row.Type} {row.Name}");
                             }
 
-
-                            await CleanupArchivalAsync(solution, solutionId, row, dryRun, notes[row]);
+                            if (cleanupArchival)
+                                await CleanupArchivalAsync(solution, solutionId, row, includeAll, dryRun, notes[row]);
                         }
                         catch (OperationCanceledException) { throw; }
                         catch (Exception ex)
                         {
                             failed++;
                             notes[row].Add($"{solution.UniqueName}: LỖI {ex.Message}");
-                            row.State = RowState.Failed;
+                            Promote(row, RowState.Failed);
                             Error($"  [lỗi] {row.Type} {row.Name}: {ex.Message}");
                         }
                         finally
@@ -1268,8 +1465,8 @@ namespace DeployToSolution.ViewModels
                 Status = "Đã kết nối";
 
                 _settings.LastTargets = selectedSolutions.Select(s => s.UniqueName).ToList();
-                _settings.AddRequiredComponents = AddRequiredComponents;
-                _settings.CleanupArchival = CleanupArchival;
+                _settings.AddRequiredComponents = addRequired;
+                _settings.CleanupArchival = cleanupArchival;
                 SaveSettings();
             }
 
@@ -1277,14 +1474,34 @@ namespace DeployToSolution.ViewModels
             var summary = $"XONG - {verb}: {added}, đã có sẵn: {already}, lỗi: {failed}.";
             if (failed > 0) Error(summary); else Good(summary);
 
-            // Ghi lại lần deploy thật vào dự án: mở lại là biết đợt này đã chạy chưa, chạy ra sao.
-            if (!dryRun && CurrentProject != null)
+            // Ghi lại lần deploy thật vào đúng dự án đã chạy (không phải dự án đang mở lúc này).
+            if (!dryRun && project != null)
             {
-                CurrentProject.LastDeployedUtc = DateTime.UtcNow;
-                CurrentProject.LastResult =
+                project.EnvironmentUrl = environment;   // người dùng đã xác nhận deploy vào đây
+                project.LastDeployedUtc = DateTime.UtcNow;
+                project.LastResult =
                     $"add {added}, có sẵn {already}, lỗi {failed} · {selectedSolutions.Count} solution";
-                SaveCurrentProject(quiet: true);
+                if (ReferenceEquals(project, CurrentProject)) SaveCurrentProject(quiet: true);
+                else
+                {
+                    try { ProjectStore.Save(project); }
+                    catch (Exception ex) { Error($"Không lưu được kết quả vào dự án \"{project.Name}\": {ex.Message}"); }
+                }
             }
+        }
+
+        private static int Rank(RowState state) => state switch
+        {
+            RowState.Failed => 3,
+            RowState.Added => 2,
+            RowState.AlreadyIn => 1,
+            _ => 0
+        };
+
+        /// <summary>Chỉ nâng trạng thái lên mức tệ hơn: lỗi ở solution A không bị "đã add" ở solution B che mất.</summary>
+        private static void Promote(ComponentRow row, RowState state)
+        {
+            if (Rank(state) > Rank(row.State)) row.State = state;
         }
 
         /// <summary>
@@ -1294,12 +1511,12 @@ namespace DeployToSolution.ViewModels
         /// vẫn nói rõ lý do.
         /// </summary>
         private async Task CleanupArchivalAsync(SolutionTarget solution, string solutionId,
-            ComponentRow row, bool dryRun, List<string> note)
+            ComponentRow row, bool includeAll, bool dryRun, List<string> note)
         {
-            if (!CleanupArchival || _catalog == null) return;
+            if (_catalog == null) return;
             if (row.ComponentType != _catalog.EntityComponentType) return;
 
-            if (row.IncludeAll)
+            if (includeAll)
             {
                 Info($"  · archival: bỏ qua {row.Name} vì IncludeAll đang bật");
                 return;

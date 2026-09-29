@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -770,8 +771,9 @@ namespace DeployToSolution.Services
 
         // ---------- gợi ý tên ----------
 
-        private readonly Dictionary<string, List<string>> _suggestCache =
-            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        // Gợi ý được nạp song song (mỗi phím gõ một lượt, tiếp tục trên thread pool) nên cache phải an toàn đa luồng.
+        private readonly ConcurrentDictionary<string, List<string>> _suggestCache =
+            new ConcurrentDictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
         public const int SuggestLimit = 2000;
 

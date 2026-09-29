@@ -48,20 +48,38 @@ namespace DeployToSolution.Services
         private string UserScope => $"{_resource}/user_impersonation offline_access openid profile";
         private string AppScope => $"{_resource}/.default";
 
+        /// <summary>Gợi ý tên nạp song song với lần chạy; chỉ một luồng được làm mới token một lúc.</summary>
+        private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
+
+        /// <summary>Azure AD xoay vòng refresh token mỗi lần làm mới; bắn ra để nơi lưu trữ cập nhật theo.</summary>
+        public event Action<string> RefreshTokenChanged;
+
         public async Task<string> GetAccessTokenAsync(CancellationToken ct = default)
         {
             if (HasToken) return _accessToken;
 
-            if (!string.IsNullOrEmpty(_clientSecret))
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                await ClientCredentialsAsync(ct).ConfigureAwait(false);
+                if (HasToken) return _accessToken;   // luồng khác vừa làm mới xong
+
+                if (!string.IsNullOrEmpty(_clientSecret))
+                {
+                    await ClientCredentialsAsync(ct).ConfigureAwait(false);
+                    return _accessToken;
+                }
+
+                if (string.IsNullOrEmpty(_refreshToken))
+                    throw new InvalidOperationException("Chưa đăng nhập hoặc phiên đã hết hạn. Bấm Kết nối để đăng nhập lại.");
+
+                // Lỗi mạng thoáng qua thì ném ra nguyên văn và GIỮ refresh token, để dòng sau thử lại được.
+                await RefreshAsync(ct).ConfigureAwait(false);
                 return _accessToken;
             }
-
-            if (!string.IsNullOrEmpty(_refreshToken) && await TryRefreshAsync(ct).ConfigureAwait(false))
-                return _accessToken;
-
-            throw new InvalidOperationException("Chưa đăng nhập. Bấm Kết nối để lấy device code.");
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         public void SeedRefreshToken(string refreshToken) => _refreshToken = refreshToken;
@@ -86,25 +104,45 @@ namespace DeployToSolution.Services
             ReadTokenResponse(doc.RootElement);
         }
 
+        /// <summary>Dùng lúc kết nối: làm mới được thì thôi, không thì để người gọi chuyển sang device code.</summary>
         public async Task<bool> TryRefreshAsync(CancellationToken ct)
         {
             try
             {
-                var form = new Dictionary<string, string>
-                {
-                    ["grant_type"] = "refresh_token",
-                    ["client_id"] = _clientId,
-                    ["refresh_token"] = _refreshToken,
-                    ["scope"] = UserScope
-                };
-                using var doc = await PostFormAsync(TokenUrl, form, ct).ConfigureAwait(false);
-                ReadTokenResponse(doc.RootElement);
+                await RefreshAsync(ct).ConfigureAwait(false);
                 return true;
             }
+            catch (OperationCanceledException) { throw; }
             catch
             {
-                _refreshToken = null;
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Chỉ bỏ refresh token khi Azure AD nói rõ nó đã chết (invalid_grant...). Lỗi mạng, timeout
+        /// hay bấm Hủy đúng lúc đang làm mới thì giữ nguyên - trước đây những lỗi đó xoá mất phiên
+        /// đăng nhập và mọi dòng còn lại của lần chạy đều báo "Chưa đăng nhập".
+        /// </summary>
+        private async Task RefreshAsync(CancellationToken ct)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["client_id"] = _clientId,
+                ["refresh_token"] = _refreshToken,
+                ["scope"] = UserScope
+            };
+            try
+            {
+                using var doc = await PostFormAsync(TokenUrl, form, ct).ConfigureAwait(false);
+                ReadTokenResponse(doc.RootElement);
+            }
+            catch (OAuthException ex) when (ex.Error == "invalid_grant" || ex.Error == "interaction_required")
+            {
+                _refreshToken = null;
+                throw new InvalidOperationException(
+                    "Phiên đăng nhập đã hết hạn. Bấm Kết nối để đăng nhập lại. Chi tiết: " + ex.Message);
             }
         }
 
@@ -180,7 +218,14 @@ namespace DeployToSolution.Services
             // Renew a few minutes early so a long run never dies mid-way.
             _expiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn - 300);
             if (root.TryGetProperty("refresh_token", out var r))
-                _refreshToken = r.GetString();
+            {
+                var fresh = r.GetString();
+                if (!string.IsNullOrEmpty(fresh) && fresh != _refreshToken)
+                {
+                    _refreshToken = fresh;
+                    RefreshTokenChanged?.Invoke(fresh);
+                }
+            }
         }
 
         private static async Task<JsonDocument> PostFormAsync(string url, Dictionary<string, string> form, CancellationToken ct)
@@ -190,15 +235,16 @@ namespace DeployToSolution.Services
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                string message = body;
+                string message = body, error = null;
                 try
                 {
                     using var err = JsonDocument.Parse(body);
+                    if (err.RootElement.TryGetProperty("error", out var e)) error = e.GetString();
                     if (err.RootElement.TryGetProperty("error_description", out var d))
                         message = d.GetString();
                 }
                 catch { }
-                throw new InvalidOperationException($"OAuth {(int)resp.StatusCode}: {Trim(message)}");
+                throw new OAuthException(error, $"OAuth {(int)resp.StatusCode}: {Trim(message)}");
             }
             return JsonDocument.Parse(body);
         }
@@ -209,5 +255,12 @@ namespace DeployToSolution.Services
             s = s.Replace("\r", " ").Replace("\n", " ");
             return s.Length > 400 ? s.Substring(0, 400) + "..." : s;
         }
+    }
+
+    /// <summary>Lỗi Azure AD kèm mã "error" (invalid_grant, invalid_client...) để phân biệt token chết với lỗi thoáng qua.</summary>
+    public class OAuthException : InvalidOperationException
+    {
+        public string Error { get; }
+        public OAuthException(string error, string message) : base(message) => Error = error;
     }
 }

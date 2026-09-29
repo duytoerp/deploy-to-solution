@@ -45,6 +45,9 @@ namespace DeployToSolution.Models
         /// <summary>Khoá của mẻ gợi ý đang giữ, để không nạp lại cùng một danh sách.</summary>
         public string SuggestionKey { get; set; }
 
+        /// <summary>Số thứ tự lượt nạp gợi ý gần nhất - kết quả của lượt cũ về muộn thì bỏ.</summary>
+        public int SuggestionTicket { get; set; }
+
         public int ComponentType { get => _componentType; set => Set(ref _componentType, value); }
 
         public RowState State
@@ -81,6 +84,9 @@ namespace DeployToSolution.Models
         };
 
         public bool IsResolved => !string.IsNullOrEmpty(ObjectId) && ComponentType >= 0;
+
+        /// <summary>Quên GUID đã tra (ví dụ khi đổi môi trường) mà không đụng tới Type/Name.</summary>
+        public void ClearResolution() => Reset();
 
         private void Reset()
         {

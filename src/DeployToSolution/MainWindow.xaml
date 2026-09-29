@@ -32,6 +32,7 @@
                                VerticalAlignment="Center" Margin="0,0,18,0" />
                     <TextBlock Text="Môi trường" Foreground="#E9D5E9" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox Width="360" IsEditable="True" VerticalAlignment="Center"
+                              IsEnabled="{Binding IsIdle}"
                               Text="{Binding EnvironmentUrl, UpdateSourceTrigger=PropertyChanged}"
                               ItemsSource="{Binding RecentEnvironments}"
                               ToolTip="Ví dụ: https://vus-dev.crm5.dynamics.com" />
@@ -150,7 +151,9 @@
                              HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="2,3">
+                                <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="2,3"
+                                          IsEnabled="{Binding DataContext.IsIdle,
+                                              RelativeSource={RelativeSource AncestorType=Window}}">
                                     <StackPanel>
                                         <TextBlock Text="{Binding UniqueName}" FontWeight="SemiBold"
                                                    TextWrapping="Wrap" />
@@ -189,6 +192,7 @@
                             <TextBlock Text="Dự án" FontWeight="SemiBold" VerticalAlignment="Center"
                                        Margin="0,0,8,0" />
                             <ComboBox x:Name="ProjectCombo" Width="260" MaxDropDownHeight="420"
+                                      IsEnabled="{Binding IsIdle}"
                                       ItemsSource="{Binding Projects}"
                                       SelectedItem="{Binding CurrentProject, Mode=TwoWay}"
                                       PreviewMouseWheel="Combo_PreviewMouseWheel"
@@ -251,7 +255,10 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Đang chạy thì chỉ xem: sửa Name/Type/IncludeAll giữa chừng làm lệch lần chạy.
+                         Dùng IsReadOnly chứ không IsEnabled để vẫn cuộn xem trạng thái được. -->
                     <DataGrid x:Name="RowsGrid" ItemsSource="{Binding Rows}" AutoGenerateColumns="False"
+                              IsReadOnly="{Binding IsBusy}"
                               CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDEBE9"
                               RowHeaderWidth="0" BorderThickness="0" SelectionMode="Extended"
@@ -290,7 +297,11 @@
                                 </DataGridTemplateColumn.CellTemplate>
                                 <DataGridTemplateColumn.CellEditingTemplate>
                                     <DataTemplate>
-                                        <ComboBox IsEditable="True"
+                                        <!-- Vẫn gõ được (để điền số componenttype), nhưng tắt tự hoàn thành
+                                             chữ và chặn lăn chuột: hai thứ làm Plug-in step âm thầm
+                                             thành Plug-in type / Plug-in assembly. -->
+                                        <ComboBox IsEditable="True" IsTextSearchEnabled="False"
+                                                  PreviewMouseWheel="Combo_PreviewMouseWheel"
                                                   Text="{Binding Type, UpdateSourceTrigger=LostFocus}"
                                                   ItemsSource="{Binding DataContext.TypeNames,
                                                       RelativeSource={RelativeSource AncestorType=Window}}" />
@@ -365,9 +376,11 @@
                 <Button Content="Hủy" Style="{StaticResource Flat}" Command="{Binding CancelCommand}" />
                 <Border Width="1" Background="{StaticResource Line}" Margin="10,2" />
                 <CheckBox Content="Add required components" VerticalAlignment="Center"
+                          IsEnabled="{Binding IsIdle}"
                           IsChecked="{Binding AddRequiredComponents}"
                           ToolTip="Kéo theo các component phụ thuộc mà Dataverse yêu cầu. Mặc định tắt cho hotfix." />
                 <CheckBox Content="Gỡ MetadataForArchival" VerticalAlignment="Center" Margin="12,0,0,0"
+                          IsEnabled="{Binding IsIdle}"
                           IsChecked="{Binding CleanupArchival}"
                           ToolTip="Khi add một Table, Dataverse tự kéo thêm bản ghi MetadataForArchival cùng tên (metadata retention). Tick để gỡ nó khỏi solution. Bản ghi đã bật retention thật sẽ luôn được giữ lại." />
                 <ProgressBar Width="220" Height="16" Margin="16,0,8,0" VerticalAlignment="Center"

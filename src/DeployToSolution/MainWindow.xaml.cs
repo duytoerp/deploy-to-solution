@@ -41,6 +41,17 @@ namespace DeployToSolution
 
             Closing += (s, e) =>
             {
+                // Đóng giữa lúc đang add là bỏ dở lần deploy mà không có báo cáo nào - phải hỏi.
+                if (_vm.IsBusy)
+                {
+                    var answer = MessageBox.Show(this,
+                        "App đang chạy dở. Đóng bây giờ thì những component chưa tới lượt sẽ không được add, " +
+                        "và không có báo cáo kết quả.\n\nVẫn đóng?",
+                        "Đang chạy", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                    if (answer != MessageBoxResult.Yes) { e.Cancel = true; return; }
+                    _vm.CancelCommand.Execute(null);
+                }
+
                 // Tự lưu dự án khi đóng: không bao giờ để mất danh sách vừa dựng vì quên bấm Lưu.
                 _vm.SaveCurrentProject(quiet: true);
                 _vm.SaveSettings();
@@ -61,7 +72,10 @@ namespace DeployToSolution
             if (sender is not ComboBox combo || combo.DataContext is not ComponentRow row) return;
 
             var typed = combo.Text;
-            await _vm.LoadNameSuggestionsAsync(row, typed);
+
+            // False = kết quả đã cũ (người dùng gõ tiếp trong lúc chờ mạng). Khi đó mà ghi lại
+            // "typed" vào ô là xoá mất những chữ vừa gõ thêm.
+            if (!await _vm.LoadNameSuggestionsAsync(row, typed)) return;
 
             // Đổi ItemsSource có thể làm ComboBox tự viết lại ô text; giữ đúng thứ người dùng đang gõ.
             if (combo.Text != typed) combo.Text = typed;
@@ -134,10 +148,7 @@ namespace DeployToSolution
 
         private void UncheckSelected_Click(object sender, RoutedEventArgs e) => SetInclude(false);
 
-        private void SetInclude(bool include)
-        {
-            foreach (var row in SelectedRows()) row.Include = include;
-        }
+        private void SetInclude(bool include) => _vm.SetInclude(SelectedRows(), include);
 
         private void CopyName_Click(object sender, RoutedEventArgs e) =>
             CopyColumn(r => r.Name, "Name");
