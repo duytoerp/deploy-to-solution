@@ -82,6 +82,16 @@ namespace DeployToSolution.Services
                 VariantField = "type", VariantLabels = FormTypes,
                 ExtraSelect = new[] { "objecttypecode", "type", "componentstate" }
             },
+            // Dashboard không có componenttype riêng: nó là systemform loại 0/10/13/103. Dashboard dùng
+            // chung có objecttypecode = 'none' nên không chọn qua bảng như Form được.
+            ["dashboard"] = new QueryDef
+            {
+                EntitySet = "systemforms", IdField = "formid",
+                NameFields = new[] { "name" },
+                FixedFilter = "(type eq 0 or type eq 10 or type eq 13 or type eq 103)",
+                VariantField = "type", VariantLabels = FormTypes,
+                ExtraSelect = new[] { "type", "objecttypecode", "componentstate" }
+            },
             ["savedqueryvisualization"] = new QueryDef
             {
                 EntitySet = "savedqueryvisualizations", IdField = "savedqueryvisualizationid",
@@ -216,6 +226,9 @@ namespace DeployToSolution.Services
             ["form"] = "systemform",
             ["systemform"] = "systemform",
             ["chart"] = "savedqueryvisualization",
+            ["dashboard"] = "dashboard",
+            ["interactivedashboard"] = "dashboard",
+            ["powerbidashboard"] = "dashboard",
             ["process"] = "workflow",
             ["flow"] = "workflow",
             ["cloudflow"] = "workflow",
@@ -323,7 +336,7 @@ namespace DeployToSolution.Services
         /// </summary>
         public static readonly string[] FriendlyTypeNames =
         {
-            "Table", "Column", "Choice", "View", "Form", "Chart", "Process", "BPF", "Cloud flow",
+            "Table", "Column", "Choice", "View", "Form", "Chart", "Dashboard", "Process", "BPF", "Cloud flow",
             "Plug-in assembly", "Plug-in type", "Plug-in step", "Web resource", "App", "Canvas app",
             "Security role", "Column security profile", "Connection reference", "Environment variable",
             "Relationship", "Key", "Custom API", "Custom control", "Site map", "Service endpoint",
@@ -373,6 +386,11 @@ namespace DeployToSolution.Services
             foreach (var kv in Fallback)
                 if (!_byKey.ContainsKey(kv.Key))
                     Add(new ComponentTypeDef { Value = kv.Value, Label = Pretty(kv.Key), Key = kv.Key });
+
+            // Dashboard mượn mã componenttype của System Form. Chỉ ghi vào _byKey, không vào Types,
+            // để gõ số 60 vẫn ra System Form chứ không ra Dashboard.
+            if (_byKey.TryGetValue("systemform", out var form))
+                _byKey["dashboard"] = new ComponentTypeDef { Value = form.Value, Label = "Dashboard", Key = "dashboard" };
 
             BuildTypeNames();
         }
@@ -826,7 +844,8 @@ namespace DeployToSolution.Services
         /// component của mình, nên chữ đang gõ phải được đẩy xuống server bằng contains().
         /// </summary>
         private static bool SearchesOnServer(ComponentTypeDef type) =>
-            type != null && Queries.ContainsKey(type.Key) && !TableScoped.ContainsKey(type.Key);
+            type != null && Queries.ContainsKey(type.Key) && !TableScoped.ContainsKey(type.Key) &&
+            type.Key != "dashboard";   // vài chục tới vài trăm bản ghi, 2000 dòng đầu là đủ
 
         /// <summary>Loại mà ô Lọc / ô Name phải gõ đủ vài ký tự thì mới tìm ra, vì phải lọc trên server.</summary>
         public bool SearchesOnServer(string typeInput) => SearchesOnServer(MatchType(typeInput));
@@ -929,7 +948,10 @@ namespace DeployToSolution.Services
                     return _relationshipCache.Select(r => Str(r, "SchemaName")).ToList();
 
                 default:
-                    return await QuerySuggestionsAsync(type, null, SearchSeed(currentName), ct).ConfigureAwait(false);
+                    // Chỉ đẩy chữ đang gõ xuống server khi khoá cache cũng tính chữ đó (xem SuggestionKey),
+                    // không thì mẻ đã lọc bị cache như thể là danh sách đầy đủ.
+                    var seed = SearchesOnServer(type) ? SearchSeed(currentName) : null;
+                    return await QuerySuggestionsAsync(type, null, seed, ct).ConfigureAwait(false);
             }
         }
 

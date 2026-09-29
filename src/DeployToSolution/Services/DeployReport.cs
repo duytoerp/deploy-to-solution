@@ -33,6 +33,7 @@ namespace DeployToSolution.Services
             ["savedquery"] = "View",
             ["systemform"] = "Form",
             ["savedqueryvisualization"] = "Chart",
+            ["dashboard"] = "Dashboard",
             ["workflow"] = "Process",
             ["pluginassembly"] = "Code dll",
             ["plugintype"] = "Plugin type",
@@ -56,7 +57,7 @@ namespace DeployToSolution.Services
         private static readonly string[] Order =
         {
             "entity", "attribute", "entityrelationship", "relationship", "entitykey",
-            "optionset", "savedquery", "systemform", "savedqueryvisualization",
+            "optionset", "savedquery", "systemform", "savedqueryvisualization", "dashboard",
             "workflow", "pluginassembly", "plugintype", "sdkmessageprocessingstep",
             "webresource", "customcontrol", "customapi", "appmodule", "canvasapp",
             "sitemap", "connectionreference", "environmentvariabledefinition",

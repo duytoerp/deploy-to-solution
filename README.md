@@ -114,6 +114,7 @@ Form,hs_api_log|Information,N
 | `Table` | logical name, schema name hoặc display name | `hs_api_log` / `API Log` |
 | `Column` | `bang.cot` | `hs_api_log.hs_retry_count` |
 | `View` / `Form` / `Chart` | `bang|tên`, thêm `|biến thể` nếu trùng | `hs_api_log|Information|Main` |
+| `Dashboard` | đúng tên dashboard, **không** ghi bảng | `VUS Sales Dashboard` |
 | `Process` / `BPF` / `Cloud flow` | đúng tên process | `[WF][Invoice] Update Canceled Date` |
 | `Plug-in assembly` | tên assembly | `VUS.Core.Plugins` |
 | `Plug-in step` | đúng tên trong **Plug-in steps** của solution trên web | `VUS.Core.Plugins.PreUpdateInvoice` |
@@ -136,6 +137,7 @@ và cache lại cho các dòng sau cùng Type.
 | `Column` / `Key` | chưa gõ bảng thì gợi ý `hs_api_log.` để chọn bảng trước; gõ xong bảng, bấm lại vào ô thì gợi ý đủ `bảng.cột` |
 | `View` / `Form` / `Chart` | gợi ý sẵn dạng `bảng|tên`, dán vào là chạy |
 | `Choice` | tên global choice |
+| `Dashboard` | tên mọi dashboard (classic, interactive, contextual, Power BI), không cần chọn bảng |
 | `Relationship` | schema name |
 | còn lại | tên lấy từ chính bảng tương ứng (workflow, plugin step, web resource...) |
 
@@ -210,7 +212,7 @@ Dropdown cột **Type** được nạp **từ chính môi trường** (option se
 nên luôn khớp phiên bản Dataverse của bạn. Tên hiển thị viết **đúng như cây Objects của Power Apps**
 để nhìn màn hình solution rồi chọn ở đây là khớp:
 
-`Table` `Column` `Choice` `View` `Form` `Chart` `Process` `BPF` `Cloud flow`
+`Table` `Column` `Choice` `View` `Form` `Chart` `Dashboard` `Process` `BPF` `Cloud flow`
 `Plug-in assembly` `Plug-in type` `Plug-in step` `Web resource` `App` `Canvas app` `Security role`
 `Column security profile` `Connection reference` `Environment variable` `Relationship` `Key`
 `Custom API` `Custom control`/`PCF` `Site map` `Service endpoint` `Report` `Email template` `SLA`
@@ -219,6 +221,10 @@ Dấu cách và gạch nối **không tính**, nên file Excel cũ viết liền
 `SecurityRole`, `CloudFlow`...) vẫn nạp được y nguyên, không phải sửa gì.
 
 Nếu một loại lạ chưa có sẵn, điền **số component type** vào cột `Type` (ví dụ `29`) là được.
+
+`Dashboard` không phải một component type riêng trong Dataverse: dashboard là bản ghi `systemform`
+(componenttype 60) có `type` = 0 / 10 / 13 / 103. Dashboard dùng chung có `objecttypecode = 'none'`
+nên chọn qua `Form` (phải chọn bảng trước) là không tìm ra — hãy dùng Type `Dashboard`.
 
 ---
 
